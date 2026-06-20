@@ -1,0 +1,6 @@
+{
+  "name": "Local Password Manager",
+  "description": "A secure, local-first password manager that runs entirely offline. All credentials and secure notes are encrypted client-side using industry-standard AES-256-GCM and PBKDF2, with no data ever leaving your device.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
