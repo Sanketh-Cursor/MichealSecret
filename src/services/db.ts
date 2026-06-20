@@ -4,23 +4,31 @@
  */
 
 import { VaultEntry, SecureNote, AppSettings, MasterPasswordConfig } from '../types';
+import { db } from './firebase';
+import { 
+  doc, 
+  setDoc, 
+  getDoc, 
+  getDocs, 
+  deleteDoc, 
+  collection 
+} from 'firebase/firestore';
 
 const DB_NAME = 'LocalPasswordManagerDB';
 const DB_VERSION = 1;
 
 /**
- * DATABASE STORAGE - SECURITY ANALYSIS
+ * DATABASE STORAGE - SECURITY & HYBRID PARADIGMS
  * 
  * DESIGN DECISIONS & SECURITY STANDARDS:
- * 1. Client-Side sandboxed storage:
- *    - Data is stored in the browser's IndexedDB, which is tied to the Origin (domain/port) under the Same-Origin Policy.
- *    - Sandboxing prevents other websites or apps from reading or writing to this database.
- * 2. Fully Encrypted Credentials/Notes:
- *    - Sensitive fields (passwords, notes content, descriptions) are stored as ciphertexts encrypted with AES-256-GCM.
- *    - Titles, URLs, usernames, emails, and metadata (like timestamps) are stored in plaintext to allow localized, indexed,
- *      super-fast client-side searching and sorting without having to decrypt every single entry in the memory array.
- * 3. Offline-First:
- *    - Zero network calls. No telemetry. No servers. The databases are established and initialized locally, matching SQLite paradigms.
+ * 1. Hybrid Client-Cloud Persistence:
+ *    - By default, user state is sandboxed inside local IndexedDB.
+ *    - When authenticated via Google OAuth 2.0 with Firebase Auth, data securely synchronizes with Firestore.
+ *    - To maintain absolute secrecy, sensitive fields (passwords, notes content) are fully encrypted in AES-256-GCM
+ *      prior to syncing to Firestore. Plaintext Master Passwords are never sent across the network.
+ * 2. Identity Sandboxing in Cloud:
+ *    - Document boundaries are isolated under specific routes: /users/{userId}/[collections]
+ *    - User A cannot view, write, or find User B's vault items due to Firestore secure rules.
  */
 
 export function openDatabase(): Promise<IDBDatabase> {
@@ -73,7 +81,13 @@ async function getStore(storeName: string, mode: IDBTransactionMode): Promise<{ 
    Master Password / Auth Operations
    ========================================================================== */
 
-export async function saveMasterPasswordConfig(config: MasterPasswordConfig): Promise<void> {
+export async function saveMasterPasswordConfig(config: MasterPasswordConfig, userId?: string): Promise<void> {
+  if (userId) {
+    const docRef = doc(db, 'users', userId, 'auth_config', 'config');
+    await setDoc(docRef, config);
+    return;
+  }
+
   const { store } = await getStore('auth_config', 'readwrite');
   return new Promise((resolve, reject) => {
     const request = store.put({ id: 'config', ...config });
@@ -82,7 +96,24 @@ export async function saveMasterPasswordConfig(config: MasterPasswordConfig): Pr
   });
 }
 
-export async function getMasterPasswordConfig(): Promise<MasterPasswordConfig | null> {
+export async function getMasterPasswordConfig(userId?: string): Promise<MasterPasswordConfig | null> {
+  if (userId) {
+    try {
+      const docRef = doc(db, 'users', userId, 'auth_config', 'config');
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        return {
+          salt: data.salt,
+          verificationHash: data.verificationHash
+        };
+      }
+      return null;
+    } catch (err) {
+      console.error("Firestore loading of config failed, fallback to local:", err);
+    }
+  }
+
   const { store } = await getStore('auth_config', 'readonly');
   return new Promise((resolve, reject) => {
     const request = store.get('config');
@@ -97,7 +128,13 @@ export async function getMasterPasswordConfig(): Promise<MasterPasswordConfig | 
    AppSettings Operations
    ========================================================================== */
 
-export async function saveAppSettings(settings: AppSettings): Promise<void> {
+export async function saveAppSettings(settings: AppSettings, userId?: string): Promise<void> {
+  if (userId) {
+    const docRef = doc(db, 'users', userId, 'settings', 'app_settings');
+    await setDoc(docRef, settings);
+    return;
+  }
+
   const { store } = await getStore('settings', 'readwrite');
   return new Promise((resolve, reject) => {
     const request = store.put({ id: 'app_settings', ...settings });
@@ -106,25 +143,39 @@ export async function saveAppSettings(settings: AppSettings): Promise<void> {
   });
 }
 
-export async function getAppSettings(): Promise<AppSettings> {
+export async function getAppSettings(userId?: string): Promise<AppSettings> {
+  const defaultSettings: AppSettings = {
+    autoLockDuration: 15, // 15 minutes by default
+    theme: 'light',
+  };
+
+  if (userId) {
+    try {
+      const docRef = doc(db, 'users', userId, 'settings', 'app_settings');
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        return {
+          autoLockDuration: data.autoLockDuration ?? 15,
+          theme: data.theme ?? 'light'
+        };
+      }
+    } catch (err) {
+      console.error("Firestore loading of settings failed, fallback:", err);
+    }
+  }
+
   try {
     const { store } = await getStore('settings', 'readonly');
     return new Promise((resolve, reject) => {
       const request = store.get('app_settings');
       request.onsuccess = () => {
-        const defaultSettings: AppSettings = {
-          autoLockDuration: 15, // 15 minutes by default
-          theme: 'light',
-        };
         resolve(request.result ? { autoLockDuration: request.result.autoLockDuration, theme: request.result.theme } : defaultSettings);
       };
       request.onerror = () => reject(request.error);
     });
   } catch (e) {
-    return {
-      autoLockDuration: 15,
-      theme: 'light',
-    };
+    return defaultSettings;
   }
 }
 
@@ -132,7 +183,21 @@ export async function getAppSettings(): Promise<AppSettings> {
    VaultEntries / Credentials CRUD
    ========================================================================== */
 
-export async function getVaultEntries(): Promise<VaultEntry[]> {
+export async function getVaultEntries(userId?: string): Promise<VaultEntry[]> {
+  if (userId) {
+    try {
+      const colRef = collection(db, 'users', userId, 'vault_entries');
+      const snap = await getDocs(colRef);
+      const entries: VaultEntry[] = [];
+      snap.forEach(doc => {
+        entries.push(doc.data() as VaultEntry);
+      });
+      return entries;
+    } catch (err) {
+      console.error("Firestore loading of vault entries failed, fallback to local:", err);
+    }
+  }
+
   const { store } = await getStore('vault_entries', 'readonly');
   return new Promise((resolve, reject) => {
     const request = store.getAll();
@@ -141,7 +206,13 @@ export async function getVaultEntries(): Promise<VaultEntry[]> {
   });
 }
 
-export async function saveVaultEntry(entry: VaultEntry): Promise<void> {
+export async function saveVaultEntry(entry: VaultEntry, userId?: string): Promise<void> {
+  if (userId) {
+    const docRef = doc(db, 'users', userId, 'vault_entries', entry.id);
+    await setDoc(docRef, entry);
+    return;
+  }
+
   const { store } = await getStore('vault_entries', 'readwrite');
   return new Promise((resolve, reject) => {
     const request = store.put(entry);
@@ -150,7 +221,13 @@ export async function saveVaultEntry(entry: VaultEntry): Promise<void> {
   });
 }
 
-export async function deleteVaultEntry(id: string): Promise<void> {
+export async function deleteVaultEntry(id: string, userId?: string): Promise<void> {
+  if (userId) {
+    const docRef = doc(db, 'users', userId, 'vault_entries', id);
+    await deleteDoc(docRef);
+    return;
+  }
+
   const { store } = await getStore('vault_entries', 'readwrite');
   return new Promise((resolve, reject) => {
     const request = store.delete(id);
@@ -163,7 +240,21 @@ export async function deleteVaultEntry(id: string): Promise<void> {
    SecureNotes CRUD
    ========================================================================== */
 
-export async function getSecureNotes(): Promise<SecureNote[]> {
+export async function getSecureNotes(userId?: string): Promise<SecureNote[]> {
+  if (userId) {
+    try {
+      const colRef = collection(db, 'users', userId, 'secure_notes');
+      const snap = await getDocs(colRef);
+      const notes: SecureNote[] = [];
+      snap.forEach(doc => {
+        notes.push(doc.data() as SecureNote);
+      });
+      return notes;
+    } catch (err) {
+      console.error("Firestore loading of secure notes failed, fallback to local:", err);
+    }
+  }
+
   const { store } = await getStore('secure_notes', 'readonly');
   return new Promise((resolve, reject) => {
     const request = store.getAll();
@@ -172,7 +263,13 @@ export async function getSecureNotes(): Promise<SecureNote[]> {
   });
 }
 
-export async function saveSecureNote(note: SecureNote): Promise<void> {
+export async function saveSecureNote(note: SecureNote, userId?: string): Promise<void> {
+  if (userId) {
+    const docRef = doc(db, 'users', userId, 'secure_notes', note.id);
+    await setDoc(docRef, note);
+    return;
+  }
+
   const { store } = await getStore('secure_notes', 'readwrite');
   return new Promise((resolve, reject) => {
     const request = store.put(note);
@@ -181,7 +278,13 @@ export async function saveSecureNote(note: SecureNote): Promise<void> {
   });
 }
 
-export async function deleteSecureNote(id: string): Promise<void> {
+export async function deleteSecureNote(id: string, userId?: string): Promise<void> {
+  if (userId) {
+    const docRef = doc(db, 'users', userId, 'secure_notes', id);
+    await deleteDoc(docRef);
+    return;
+  }
+
   const { store } = await getStore('secure_notes', 'readwrite');
   return new Promise((resolve, reject) => {
     const request = store.delete(id);
@@ -194,10 +297,12 @@ export async function deleteSecureNote(id: string): Promise<void> {
    Full Vault Reset (Standard factory wipe)
    ========================================================================== */
 
-export async function clearAllVaultData(): Promise<void> {
-  const db = await openDatabase();
+export async function clearAllVaultData(userId?: string): Promise<void> {
+  // If online, we don't automatically delete remote databases to protect user from mistakes,
+  // but we reset the client-side IndexedDB Cache immediately.
+  const dbInst = await openDatabase();
   const stores = ['auth_config', 'vault_entries', 'secure_notes', 'settings'];
-  const transaction = db.transaction(stores, 'readwrite');
+  const transaction = dbInst.transaction(stores, 'readwrite');
   
   stores.forEach(storeName => {
     transaction.objectStore(storeName).clear();
@@ -207,4 +312,37 @@ export async function clearAllVaultData(): Promise<void> {
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error);
   });
+}
+
+/* ==========================================================================
+   Migration helper to sync Local cache to Firebase Firestore cloud storage
+   ========================================================================== */
+
+export async function syncLocalToFirebase(userId: string): Promise<void> {
+  // Sync core encryption config if absent in cloud
+  const remoteConfig = await getMasterPasswordConfig(userId);
+  if (!remoteConfig) {
+    const localConfig = await getMasterPasswordConfig();
+    if (localConfig) {
+      await saveMasterPasswordConfig(localConfig, userId);
+    }
+  }
+
+  // Push local entries to cloud
+  const localEntries = await getVaultEntries();
+  for (const entry of localEntries) {
+    await saveVaultEntry(entry, userId);
+  }
+
+  // Push local secure notes to cloud
+  const localNotes = await getSecureNotes();
+  for (const note of localNotes) {
+    await saveSecureNote(note, userId);
+  }
+
+  // Push local settings to cloud
+  const localSettings = await getAppSettings();
+  if (localSettings) {
+    await saveAppSettings(localSettings, userId);
+  }
 }

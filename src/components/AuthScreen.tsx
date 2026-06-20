@@ -4,7 +4,22 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Shield, Lock, Unlock, Eye, EyeOff, AlertTriangle, CheckCircle2, ShieldCheck, RefreshCw } from 'lucide-react';
+import { 
+  Shield, 
+  Lock, 
+  Unlock, 
+  Eye, 
+  EyeOff, 
+  AlertTriangle, 
+  CheckCircle2, 
+  ShieldCheck, 
+  RefreshCw,
+  Sparkles,
+  CloudLightning,
+  LogOut,
+  UserCheck
+} from 'lucide-react';
+import { User } from 'firebase/auth';
 import { generateSalt, deriveMasterKey, computeVerificationHash, verifyMasterPassword } from '../services/crypto';
 import { saveMasterPasswordConfig, getMasterPasswordConfig } from '../services/db';
 import { evaluatePasswordStrength } from '../utils/strength';
@@ -12,9 +27,18 @@ import { evaluatePasswordStrength } from '../utils/strength';
 interface AuthScreenProps {
   onAuthSuccess: (masterKey: CryptoKey) => void;
   isInitialSetup: boolean;
+  user: User | null;
+  onGoogleSignIn: () => Promise<void>;
+  onGoogleSignOut: () => Promise<void>;
 }
 
-export default function AuthScreen({ onAuthSuccess, isInitialSetup }: AuthScreenProps) {
+export default function AuthScreen({ 
+  onAuthSuccess, 
+  isInitialSetup, 
+  user, 
+  onGoogleSignIn, 
+  onGoogleSignOut 
+}: AuthScreenProps) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -79,11 +103,11 @@ export default function AuthScreen({ onAuthSuccess, isInitialSetup }: AuthScreen
       // 3. Compute verification hash
       const verificationHash = await computeVerificationHash(masterKey);
       
-      // 4. Persist to secure local database
+      // 4. Persist to secure database (local or Firestore)
       await saveMasterPasswordConfig({
         salt,
         verificationHash
-      });
+      }, user?.uid || undefined);
       
       setSuccess('Vault encryption key established successfully!');
       setTimeout(() => {
@@ -113,9 +137,13 @@ export default function AuthScreen({ onAuthSuccess, isInitialSetup }: AuthScreen
 
     setLoading(true);
     try {
-      const config = await getMasterPasswordConfig();
+      const config = await getMasterPasswordConfig(user?.uid || undefined);
       if (!config) {
-        setError('No Vault settings detected. Please reload.');
+        setError(
+          user 
+            ? 'No Cloud Vault settings detected. Please verify your account setup or establish a Master Password.'
+            : 'No local Vault settings detected. Please reload.'
+        );
         setLoading(false);
         return;
       }
@@ -171,16 +199,95 @@ export default function AuthScreen({ onAuthSuccess, isInitialSetup }: AuthScreen
         {/* Shield Visual Header */}
         <div className="text-center space-y-2 select-none">
           <div className="inline-flex items-center justify-center p-4 bg-indigo-50 dark:bg-indigo-950/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 text-indigo-600 dark:text-indigo-400 mb-2">
-            <Shield className="w-8 h-8" />
+            <Shield className="w-8 h-8 animate-pulse" />
           </div>
           <h1 className="text-xl md:text-2xl font-extrabold font-sans tracking-tight text-slate-900 dark:text-zinc-50">
             {isInitialSetup ? 'Create Master Password' : 'Unlock Your Vault'}
           </h1>
           <p className="text-xs text-slate-500 dark:text-zinc-400 max-w-xs mx-auto">
             {isInitialSetup 
-              ? 'Establish a master password. It cannot be recovered if lost.'
+              ? 'Establish an encryption master password. It cannot be recovered if lost.'
               : 'Enter your Master Password to decrypt and load your database.'}
           </p>
+        </div>
+
+        {/* GOOGLE OAUTH 2.0 INTEGRATION CONTAINER */}
+        <div className="bg-slate-50 dark:bg-zinc-900/40 border border-slate-150 dark:border-zinc-900 p-4 rounded-2xl flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-[10px] uppercase tracking-wider font-extrabold text-slate-450 dark:text-zinc-500 flex items-center gap-1.5 font-mono">
+              <CloudLightning className="w-3.5 h-3.5 text-indigo-550 dark:text-indigo-400" />
+              <span>Google OAuth 2.0 Cloud Backup</span>
+            </h3>
+            {user && (
+              <span className="text-[9px] font-bold text-emerald-555 dark:text-emerald-400 bg-emerald-500/10 py-0.5 px-2 rounded-md flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                Cloud Connected
+              </span>
+            )}
+          </div>
+          
+          {user ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5 bg-white dark:bg-zinc-900 p-2.5 rounded-xl border border-slate-200/50 dark:border-zinc-800/60 shadow-xs">
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt={user.displayName || 'Google user'} className="w-7 h-7 rounded-full shrink-0 border border-slate-205 dark:border-zinc-800" referrerPolicy="no-referrer" />
+                ) : (
+                  <div className="w-7 h-7 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-xs uppercase shadow-sm">
+                    {user.email?.charAt(0) || 'G'}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-slate-805 dark:text-zinc-200 truncate">{user.displayName || 'Google Account'}</p>
+                  <p className="text-[10px] text-slate-455 dark:text-zinc-450 truncate font-mono">{user.email}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onGoogleSignOut}
+                  className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 p-1.5 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer"
+                  title="Disconnect Google"
+                  id="btn-disconnect-google"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-500 dark:text-zinc-450 leading-relaxed leading-normal">
+                You are currently signed in with Google OAuth 2.0. Your database is securely backed up and synced in real-time.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-[10px] text-slate-500 dark:text-zinc-400 leading-normal">
+                Enable cloud replication to access your encrypted vaults seamlessly across multiple devices under dual-identity protection.
+              </p>
+              
+              <button
+                type="button"
+                onClick={onGoogleSignIn}
+                className="w-full bg-white hover:bg-slate-50 dark:bg-zinc-900 dark:hover:bg-zinc-850/80 text-slate-700 dark:text-zinc-200 border border-slate-250 dark:border-zinc-800 font-bold py-2 px-3 rounded-xl text-xs transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99]"
+                id="btn-google-sign-in"
+              >
+                <svg className="w-4.5 h-4.5" viewBox="0 0 24 24">
+                  <path
+                    fill="#4285F4"
+                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v3.92h6.63c-.29 1.5-.1.3-.1 2.37l-3.35 2.24 3.25 2.52c1.9-1.75 3-4.32 3-7.23z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.83-2.97c-1.08.73-2.48 1.16-4.1 1.16-3.15 0-5.81-2.13-6.76-5l-3.95 3.06C3.26 21.03 7.31 24 12 24z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.24 14.28c-.24-.73-.38-1.5-.38-2.28s.14-1.55.38-2.28L1.29 6.66C.47 8.3 0 10.1 0 12s.47 3.7 1.29 5.34l3.95-3.06z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.97 1.29 6.66l3.95 3.06c.95-2.87 3.61-5 6.76-5z"
+                  />
+                </svg>
+                <span>Authorize & Unlock with Google</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {error && (
@@ -274,7 +381,7 @@ export default function AuthScreen({ onAuthSuccess, isInitialSetup }: AuthScreen
                 <input
                   id="master-confirm-input"
                   type={showPassword ? 'text' : 'password'}
-                  className="block w-full pl-10 py-3 text-sm bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-850 rounded-xl placeholder-slate-450 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 dark:focus:ring-indigo-500/20 dark:focus:border-indigo-500 text-slate-900 dark:text-zinc-100 transition-all font-mono"
+                  className="block w-full pl-10 py-3 text-sm bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-850 rounded-xl placeholder-slate-455 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 dark:focus:ring-indigo-500/20 dark:focus:border-indigo-500 text-slate-900 dark:text-zinc-100 transition-all font-mono"
                   placeholder="Repeat Master Password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
@@ -309,10 +416,10 @@ export default function AuthScreen({ onAuthSuccess, isInitialSetup }: AuthScreen
         {/* Cryptography Compliance Footer */}
         <div className="bg-slate-50 dark:bg-zinc-900/40 border border-slate-150 dark:border-zinc-900 p-4 rounded-2xl space-y-1.5 select-none">
           <h3 className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400 dark:text-zinc-500">
-            Military-Grade Security Engineering
+            Zero-Knowledge Cryptography compliance
           </h3>
-          <p className="text-[10px] text-slate-500 dark:text-zinc-400 leading-relaxed font-sans">
-            Derived keys employ hardware-accelerated <b>PBKDF2-HMAC-SHA256</b> (600,000 rounds) generating distinct 256-bit symmetric tags. Symmetric storage operations utilize verified, authenticated **AES-256-GCM** inside the client execution box. No server connection is engaged (Full local-first offline isolation).
+          <p className="text-[10px] text-slate-500 dark:text-zinc-400 leading-normal font-sans">
+            Authentication performs identity checking via <b>Google OAuth 2.0</b>. Encryption executes inside your sandbox using derived keys with 600,000-round <b>PBKDF2-HMAC-SHA256</b> and 256-bit symmetric tags (<b>AES-GCM</b>). The cloud provider cannot view or access your secrets.
           </p>
         </div>
 

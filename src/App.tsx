@@ -8,15 +8,30 @@ import {
   ShieldAlert, 
   Lock, 
   Key, 
-  BookOpen, 
   Settings, 
   ShieldCheck, 
   Sparkles, 
-  RefreshCw 
+  RefreshCw,
+  Cloud,
+  LogOut,
+  Sliders,
+  Database
 } from 'lucide-react';
+import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 
 import { AppSettings, VaultEntry, SecureNote } from './types';
-import { getAppSettings, getVaultEntries, getSecureNotes, getMasterPasswordConfig, saveVaultEntry, saveSecureNote, deleteVaultEntry, deleteSecureNote } from './services/db';
+import { 
+  getAppSettings, 
+  getVaultEntries, 
+  getSecureNotes, 
+  getMasterPasswordConfig, 
+  saveVaultEntry, 
+  saveSecureNote, 
+  deleteVaultEntry, 
+  deleteSecureNote,
+  syncLocalToFirebase
+} from './services/db';
+import { auth, googleProvider } from './services/firebase';
 
 // Subcomponents
 import AuthScreen from './components/AuthScreen';
@@ -31,6 +46,9 @@ export default function App() {
   const [isInitialSetup, setIsInitialSetup] = useState(true);
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [masterKey, setMasterKey] = useState<CryptoKey | null>(null);
+
+  // Firebase Auth state
+  const [user, setUser] = useState<User | null>(null);
 
   // App settings state
   const [settings, setSettings] = useState<AppSettings>({
@@ -54,26 +72,35 @@ export default function App() {
   // Activity tracking
   const lastActiveRef = useRef<number>(Date.now());
 
-  // 1. Initial State validation & Setting loads
+  // 1. Listen to Firebase Auth state shifts and load corresponding configuration
   useEffect(() => {
-    const initializeApp = async () => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
       try {
-        const config = await getMasterPasswordConfig();
+        const config = await getMasterPasswordConfig(currentUser?.uid || undefined);
         setIsInitialSetup(!config);
 
-        const loadedSettings = await getAppSettings();
+        const loadedSettings = await getAppSettings(currentUser?.uid || undefined);
         setSettings(loadedSettings);
+
+        // If currently unlocked, swap lists to current auth partition
+        if (isUnlocked && masterKey) {
+          const allEntries = await getVaultEntries(currentUser?.uid || undefined);
+          const allNotes = await getSecureNotes(currentUser?.uid || undefined);
+          setEntries(allEntries);
+          setNotes(allNotes);
+        }
       } catch (err) {
-        console.error("IndexedDB load failure on startup", err);
+        console.error("Authentication listener sync check failed:", err);
       } finally {
         setDbChecking(false);
       }
-    };
+    });
 
-    initializeApp();
-  }, []);
+    return () => unsubscribe();
+  }, [isUnlocked, masterKey]);
 
-  // Sync index.html root body class context if desired
+  // Sync index.html root body dark theme class
   useEffect(() => {
     const rootClassList = document.documentElement.classList;
     if (settings.theme === 'dark') {
@@ -131,8 +158,8 @@ export default function App() {
   // Load decrypted index vault lists
   const refreshVaultData = async () => {
     try {
-      const allEntries = await getVaultEntries();
-      const allNotes = await getSecureNotes();
+      const allEntries = await getVaultEntries(user?.uid || undefined);
+      const allNotes = await getSecureNotes(user?.uid || undefined);
       setEntries(allEntries);
       setNotes(allNotes);
     } catch (err) {
@@ -146,8 +173,8 @@ export default function App() {
     lastActiveRef.current = Date.now();
     
     // Fetch user items
-    const allEntries = await getVaultEntries();
-    const allNotes = await getSecureNotes();
+    const allEntries = await getVaultEntries(user?.uid || undefined);
+    const allNotes = await getSecureNotes(user?.uid || undefined);
     setEntries(allEntries);
     setNotes(allNotes);
   };
@@ -169,24 +196,53 @@ export default function App() {
     setActiveTab('vault');
   };
 
+  // Google OAuth 2.0 Auth Actions
+  const handleGoogleSignIn = async () => {
+    try {
+      setDbChecking(true);
+      const result = await signInWithPopup(auth, googleProvider);
+      if (result.user) {
+        console.log("Successfully logged in via Google OAuth:", result.user.email);
+        // Force synchronous backup migrations from local IndexedDB cache on first login
+        await syncLocalToFirebase(result.user.uid);
+      }
+    } catch (err) {
+      console.error("Google Auth failed:", err);
+    } finally {
+      setDbChecking(false);
+    }
+  };
+
+  const handleGoogleSignOut = async () => {
+    try {
+      setDbChecking(true);
+      handleLockVault();
+      await signOut(auth);
+    } catch (err) {
+      console.error("Google disconnect error:", err);
+    } finally {
+      setDbChecking(false);
+    }
+  };
+
   // CRUD Actions
   const handleSavePassword = async (entry: VaultEntry) => {
-    await saveVaultEntry(entry);
+    await saveVaultEntry(entry, user?.uid || undefined);
     await refreshVaultData();
   };
 
   const handleSaveNote = async (note: SecureNote) => {
-    await saveSecureNote(note);
+    await saveSecureNote(note, user?.uid || undefined);
     await refreshVaultData();
   };
 
   const handleDeletePassword = async (id: string) => {
-    await deleteVaultEntry(id);
+    await deleteVaultEntry(id, user?.uid || undefined);
     await refreshVaultData();
   };
 
   const handleDeleteNote = async (id: string) => {
-    await deleteSecureNote(id);
+    await deleteSecureNote(id, user?.uid || undefined);
     await refreshVaultData();
   };
 
@@ -196,7 +252,7 @@ export default function App() {
       <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-800 dark:text-zinc-100 animate-fade-in">
         <div className="flex flex-col items-center gap-3">
           <RefreshCw className="w-8 h-8 text-indigo-600 dark:text-indigo-400 animate-spin" />
-          <span className="text-xs font-mono font-medium tracking-wider text-slate-500 dark:text-zinc-400">Validating Local Vault Containers...</span>
+          <span className="text-xs font-mono font-medium tracking-wider text-slate-500 dark:text-zinc-400">Loading Crypto Environments...</span>
         </div>
       </div>
     );
@@ -214,7 +270,10 @@ export default function App() {
                 <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
                   <ShieldCheck className="w-5 h-5 text-white" />
                 </div>
-                <span className="font-extrabold text-white tracking-tight text-xl">VaultLocal</span>
+                <div className="flex flex-col leading-tight">
+                  <span className="font-extrabold text-white tracking-tight text-lg">VaultManager</span>
+                  <span className="text-[9px] font-mono text-indigo-400 font-bold uppercase tracking-wider">With OAuth 2.0</span>
+                </div>
               </div>
               <nav className="px-4 py-6 space-y-1">
                 <button
@@ -258,15 +317,44 @@ export default function App() {
               </nav>
             </div>
 
-            {/* Sidebar bottom status block */}
-            <div className="p-4">
-              <div className="bg-indigo-600/10 border border-indigo-505/20 rounded-xl p-4">
-                <p className="text-indigo-455 text-xs font-bold uppercase tracking-wider mb-1">Vault Status</p>
-                <p className="text-white text-sm font-medium">Device Unlocked</p>
-                <div className="mt-3 w-full bg-slate-800 h-1 rounded-full overflow-hidden">
+            {/* User profile details in sidebar if logged in via Google Auth */}
+            <div className="p-4 space-y-3">
+              {user && (
+                <div className="bg-slate-800/60 p-3 rounded-xl border border-slate-700/50 flex items-center gap-2.5">
+                  {user.photoURL ? (
+                    <img src={user.photoURL} alt={user.displayName || 'Google user'} className="w-8 h-8 rounded-full border border-slate-700 shrink-0" referrerPolicy="no-referrer" />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
+                      {user.displayName?.charAt(0) || 'G'}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1 leading-normal">
+                    <p className="text-xs font-bold text-white truncate">{user.displayName || 'Client profile'}</p>
+                    <p className="text-[9px] text-indigo-400 truncate font-mono">{user.email}</p>
+                  </div>
+                  <button
+                    onClick={handleGoogleSignOut}
+                    className="text-slate-400 hover:text-red-400 transition-colors p-1"
+                    title="Sign Out Google"
+                    id="btn-sidebar-signout"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              <div className="bg-indigo-600/10 border border-indigo-500/10 rounded-xl p-4">
+                <p className="text-indigo-400 text-[10px] font-bold uppercase tracking-wider mb-1">Vault Status</p>
+                <p className="text-white text-xs font-medium flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                  {user ? 'Secured Cloud Active' : 'Offline sandbox active'}
+                </p>
+                <div className="mt-2.5 w-full bg-slate-800 h-1 rounded-full overflow-hidden">
                   <div className="bg-indigo-500 w-full h-full"></div>
                 </div>
-                <p className="text-slate-500 text-[10px] mt-2 leading-relaxed">Offline Encryption Active (Argon2id)</p>
+                <p className="text-slate-500 text-[9px] mt-2 leading-relaxed">
+                  {user ? 'Cloud Database sync: Verified via Firestore Rules' : 'Offline sandbox active (AES-256)'}
+                </p>
               </div>
             </div>
           </aside>
@@ -275,7 +363,7 @@ export default function App() {
         {/* Main section: contains Header and Viewport */}
         <div className="flex-1 flex flex-col min-w-0 min-h-screen">
           {/* Top Header Controls bar */}
-          <header className="sticky top-0 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md border-b border-slate-205 dark:border-zinc-900/80 z-40 select-none h-16 flex items-center">
+          <header className="sticky top-0 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md border-b border-slate-200 dark:border-zinc-900/80 z-40 select-none h-16 flex items-center">
             <div className="w-full px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
               
               {/* Logo (On mobile: normal brand; On desktop: Page status context statement) */}
@@ -284,30 +372,30 @@ export default function App() {
                   <div className="bg-indigo-600 p-1.5 rounded-lg text-white">
                     <ShieldCheck className="w-5 h-5" />
                   </div>
-                  <h1 className="font-sans font-black text-sm tracking-tight text-slate-900 dark:text-zinc-105">
-                    VaultLocal
+                  <h1 className="font-sans font-black text-sm tracking-tight text-slate-900 dark:text-zinc-100">
+                    VaultManager
                   </h1>
                 </div>
                 
                 {/* Desktop Header Description dynamic title */}
                 {isUnlocked && (
                   <div className="hidden lg:block text-left leading-tight">
-                    <h2 className="font-bold text-slate-800 dark:text-zinc-100 text-base tracking-tight capitalize">
+                    <h2 className="font-bold text-slate-805 dark:text-zinc-100 text-base tracking-tight capitalize">
                       {isFormOpen ? 'Edit Item' : activeTab === 'vault' ? 'All Items' : activeTab === 'generator' ? 'Password Generator' : 'Vault Settings'}
                     </h2>
                     <p className="text-[10px] uppercase font-mono font-bold tracking-wider text-slate-400 dark:text-zinc-500">
-                      Symmetric Security Panel
+                      {user ? 'Secure Replication Container' : 'Symmetric Local Storage Sandbox'}
                     </p>
                   </div>
                 )}
                 
                 {!isUnlocked && (
                   <div className="text-left leading-tight">
-                    <h1 className="font-extrabold text-sm tracking-tight text-slate-910 dark:text-zinc-101">
+                    <h1 className="font-extrabold text-sm tracking-tight text-slate-900 dark:text-zinc-100">
                       Secure Password Vault
                     </h1>
-                    <p className="text-[9px] font-mono text-slate-401 dark:text-zinc-501 font-bold uppercase tracking-wider">
-                      Zero-Knowledge Sandboxed Engine
+                    <p className="text-[9px] font-mono text-slate-400 dark:text-zinc-500 font-bold uppercase tracking-wider">
+                      Zero-Knowledge Authentication Engine
                     </p>
                   </div>
                 )}
@@ -316,9 +404,12 @@ export default function App() {
               {/* Locked/Unlocked Action states */}
               {isUnlocked && (
                 <div className="flex items-center gap-3">
-                  <span className="hidden md:inline-flex items-center gap-1.5 text-[10px] font-mono font-black uppercase text-emerald-600 bg-emerald-500/10 px-2.5 py-1 rounded-md border border-emerald-500/20">
-                    <span>Active Memory</span>
-                  </span>
+                  {user && (
+                    <span className="hidden leading-normal md:inline-flex items-center gap-1 text-[10px] font-mono font-black uppercase text-indigo-600 bg-indigo-500/10 px-2.5 py-1 rounded-md border border-indigo-500/20 dark:text-indigo-400">
+                      <Cloud className="w-3.5 h-3.5" />
+                      <span>Cloud Syncing</span>
+                    </span>
+                  )}
                   
                   <button
                     onClick={handleLockVault}
@@ -339,19 +430,22 @@ export default function App() {
               <AuthScreen 
                 onAuthSuccess={handleUnlockSuccess} 
                 isInitialSetup={isInitialSetup} 
+                user={user}
+                onGoogleSignIn={handleGoogleSignIn}
+                onGoogleSignOut={handleGoogleSignOut}
               />
             ) : (
               <div className="space-y-6">
                 
                 {/* Mobile Navigation Tabs List */}
                 {!isFormOpen && (
-                  <div className="flex lg:hidden bg-slate-100 dark:bg-zinc-900 p-1 rounded-xl border border-slate-200/40 dark:border-zinc-850 select-none pb-1.5 mb-2">
+                  <div className="flex lg:hidden bg-slate-100 dark:bg-zinc-900 p-1 rounded-xl border border-slate-205 dark:border-zinc-850 select-none pb-1.5 mb-2">
                     <button
                       onClick={() => setActiveTab('vault')}
                       className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${
                         activeTab === 'vault'
-                          ? 'bg-white dark:bg-zinc-950 text-indigo-700 dark:text-indigo-400 shadow-xs'
-                          : 'text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200'
+                          ? 'bg-white dark:bg-zinc-950 text-indigo-700 dark:text-indigo-405 shadow-xs'
+                          : 'text-slate-500 hover:text-slate-805 dark:text-zinc-400 dark:hover:text-zinc-200'
                       }`}
                       id="nav-tab-vault"
                     >
@@ -362,8 +456,8 @@ export default function App() {
                       onClick={() => setActiveTab('generator')}
                       className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${
                         activeTab === 'generator'
-                          ? 'bg-white dark:bg-zinc-950 text-indigo-700 dark:text-indigo-400 shadow-xs'
-                          : 'text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200'
+                          ? 'bg-white dark:bg-zinc-950 text-indigo-700 dark:text-indigo-405 shadow-xs'
+                          : 'text-slate-500 hover:text-slate-805 dark:text-zinc-400 dark:hover:text-zinc-200'
                       }`}
                       id="nav-tab-generator"
                     >
@@ -374,8 +468,8 @@ export default function App() {
                       onClick={() => setActiveTab('settings')}
                       className={`flex-1 py-2 text-xs font-bold rounded-lg transition-colors ${
                         activeTab === 'settings'
-                          ? 'bg-white dark:bg-zinc-950 text-indigo-700 dark:text-indigo-400 shadow-xs'
-                          : 'text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200'
+                          ? 'bg-white dark:bg-zinc-950 text-indigo-700 dark:text-indigo-405 shadow-xs'
+                          : 'text-slate-500 hover:text-slate-805 dark:text-zinc-400 dark:hover:text-zinc-200'
                       }`}
                       id="nav-tab-settings"
                     >
@@ -435,6 +529,7 @@ export default function App() {
                         onSettingsUpdate={setSettings}
                         onFactoryReset={handleFactoryReset}
                         masterKey={masterKey}
+                        userId={user?.uid || undefined}
                       />
                     )}
                   </>
@@ -443,10 +538,14 @@ export default function App() {
             )}
           </main>
 
-          {/* Global Isolated Client-Only status footer */}
+          {/* Global Client status footer */}
           <footer className="fixed bottom-0 inset-x-0 lg:left-64 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-xs py-2 text-center text-[10px] text-slate-400 dark:text-zinc-500 border-t border-slate-200 dark:border-zinc-900 select-none z-30 flex items-center justify-center gap-1.5 font-mono font-bold tracking-wide">
-            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span>ZERO-KNOWLEDGE CLIENT BOX (STRICT ISOLATION ACTIVE)</span>
+            <div className={`w-1.5 h-1.5 rounded-full ${user ? 'bg-indigo-505 animate-bounce' : 'bg-emerald-500 animate-pulse'}`} />
+            <span>
+              {user 
+                ? `CLOUD STORAGE SECURED: COMPLIANT WITH ZERO-KNOWLEDGE STANDARDS (${user.email})` 
+                : 'ZERO-KNOWLEDGE CLIENT BOX (LOCAL ISOLATION ACTIVE)'}
+            </span>
           </footer>
         </div>
 

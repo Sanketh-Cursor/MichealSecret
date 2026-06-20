@@ -1,0 +1,93 @@
+{
+  "entities": {
+    "MasterPasswordConfig": {
+      "title": "MasterPasswordConfig",
+      "description": "Cryptographic configuration for verifying the local master password and deriving keys",
+      "type": "object",
+      "properties": {
+        "salt": { "type": "string", "description": "Hex encoded cryptographic salt" },
+        "verificationHash": { "type": "string", "description": "Verification hash of the master password + salt" }
+      },
+      "required": ["salt", "verificationHash"]
+    },
+    "VaultEntry": {
+      "title": "VaultEntry",
+      "description": "An encrypted credential entry containing login information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "url": { "type": "string" },
+        "username": { "type": "string" },
+        "email": { "type": "string" },
+        "encryptedPassword": {
+          "type": "object",
+          "properties": {
+            "ciphertext": { "type": "string" },
+            "iv": { "type": "string" }
+          },
+          "required": ["ciphertext", "iv"]
+        },
+        "encryptedNotes": {
+          "type": "object",
+          "properties": {
+            "ciphertext": { "type": "string" },
+            "iv": { "type": "string" }
+          },
+          "required": ["ciphertext", "iv"]
+        },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "title", "createdAt", "updatedAt"]
+    },
+    "SecureNote": {
+      "title": "SecureNote",
+      "description": "An encrypted secure text note",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "encryptedContent": {
+          "type": "object",
+          "properties": {
+            "ciphertext": { "type": "string" },
+            "iv": { "type": "string" }
+          },
+          "required": ["ciphertext", "iv"]
+        },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "title", "createdAt", "updatedAt"]
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Individual application settings",
+      "type": "object",
+      "properties": {
+        "autoLockDuration": { "type": "number" },
+        "theme": { "type": "string", "enum": ["light", "dark"] }
+      },
+      "required": ["autoLockDuration", "theme"]
+    }
+  },
+  "firestore": {
+    "users/{userId}/auth_config/{configId}": {
+      "schema": "MasterPasswordConfig",
+      "description": "Active user cryptographic password salt and verification hash"
+    },
+    "users/{userId}/vault_entries/{entryId}": {
+      "schema": "VaultEntry",
+      "description": "Encrypted credentials collection for the user"
+    },
+    "users/{userId}/secure_notes/{noteId}": {
+      "schema": "SecureNote",
+      "description": "Encrypted secure notes collection for the user"
+    },
+    "users/{userId}/settings/{settingsId}": {
+      "schema": "AppSettings",
+      "description": "Appearance and lock preference configurations"
+    }
+  }
+}
