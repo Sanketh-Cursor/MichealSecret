@@ -21,7 +21,7 @@ import {
   UserPlus
 } from 'lucide-react';
 import { User } from '@supabase/supabase-js';
-import { supabase } from '../services/supabase';
+import { supabase, sendPasswordResetEmail, isPasskeySupported, startPasskeySignIn, startPasskeyRegistration } from '../services/supabase';
 import { generateSalt, deriveMasterKey, computeVerificationHash, verifyMasterPassword } from '../services/crypto';
 import { saveMasterPasswordConfig, getMasterPasswordConfig, syncCloud } from '../services/db';
 import { evaluatePasswordStrength } from '../utils/strength';
@@ -54,6 +54,11 @@ export default function AuthScreen({
   const [authError, setAuthError] = useState('');
   const [authSuccessMsg, setAuthSuccessMsg] = useState('');
   const [showAuthPassword, setShowAuthPassword] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotError, setForgotError] = useState('');
+  const [forgotSuccess, setForgotSuccess] = useState('');
+  const [isForgotModalOpen, setIsForgotModalOpen] = useState(false);
+  const [forgotEmailInput, setForgotEmailInput] = useState('');
   
   // Brute force protection state
   const [failedAttempts, setFailedAttempts] = useState(0);
@@ -244,6 +249,53 @@ export default function AuthScreen({
     }
   };
 
+  const handleForgotPassword = async (email?: string) => {
+    setForgotError('');
+    setForgotSuccess('');
+    const targetEmail = (email || forgotEmailInput || authEmail || '').trim();
+    if (!targetEmail) {
+      setForgotError('Please provide an email to reset password.');
+      return;
+    }
+    setForgotLoading(true);
+    try {
+      await sendPasswordResetEmail(targetEmail, window.location.origin);
+      setForgotSuccess('Password reset email sent — check your inbox.');
+      setIsForgotModalOpen(false);
+      setForgotEmailInput('');
+    } catch (err: any) {
+      console.error(err);
+      setForgotError(err?.message || 'Failed to send password reset email.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleStartPasskey = async () => {
+    try {
+      if (!authEmail) throw new Error('Enter your account email to use passkey sign-in.');
+      const result = await startPasskeySignIn(authEmail);
+      // Expect server to return session or token which you should handle according to your auth flow
+      setAuthSuccessMsg('Passkey sign-in successful.');
+      console.log('Passkey sign-in result:', result);
+    } catch (err: any) {
+      console.error('Passkey flow error:', err);
+      setAuthError(err?.message || 'Passkey flow not available.');
+    }
+  };
+
+  const handleRegisterPasskey = async () => {
+    try {
+      if (!user || !user.email) throw new Error('You must be signed in to register a passkey.');
+      const result = await startPasskeyRegistration(user.email);
+      setAuthSuccessMsg('Passkey registered successfully.');
+      console.log('Passkey registration result:', result);
+    } catch (err: any) {
+      console.error('Passkey registration error:', err);
+      setAuthError(err?.message || 'Failed to register passkey.');
+    }
+  };
+
   const handleCloudSignOut = async () => {
     setAuthLoading(true);
     setAuthError('');
@@ -289,6 +341,42 @@ export default function AuthScreen({
           </p>
         </div>
 
+        {/* Forgot Password Modal */}
+        {isForgotModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div className="w-full max-w-md bg-white dark:bg-zinc-950 p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-lg">
+              <h3 className="text-lg font-bold mb-2">Reset Password</h3>
+              <p className="text-[12px] text-slate-500 mb-4">Enter the account email to receive a password reset link.</p>
+              <div className="mb-3">
+                <input
+                  type="email"
+                  value={forgotEmailInput}
+                  onChange={(e) => setForgotEmailInput(e.target.value)}
+                  placeholder="Email address"
+                  className="w-full px-3 py-2 border rounded-lg text-sm bg-slate-50 dark:bg-zinc-900 border-slate-200 dark:border-zinc-800"
+                />
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setIsForgotModalOpen(false); setForgotEmailInput(''); setForgotError(''); }}
+                  className="px-3 py-2 rounded-lg text-sm bg-slate-100 dark:bg-zinc-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleForgotPassword()}
+                  disabled={forgotLoading}
+                  className="px-3 py-2 rounded-lg text-sm bg-indigo-600 text-white"
+                >
+                  {forgotLoading ? 'Sending...' : 'Send Reset Email'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* CLOUD SECURE BACKUP ACCOUNT CONTAINER */}
         <div className="bg-slate-50 dark:bg-zinc-900/40 border border-slate-150 dark:border-zinc-900 p-4 rounded-2xl flex flex-col gap-3">
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-900/50 pb-2">
@@ -328,16 +416,28 @@ export default function AuthScreen({
                   <p className="text-[10px] uppercase font-mono font-bold tracking-wider text-slate-400 dark:text-zinc-500">Security Principal</p>
                   <p className="text-xs font-bold text-slate-805 dark:text-zinc-200 truncate font-mono">{user.email}</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleCloudSignOut}
-                  disabled={authLoading}
-                  className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 p-2 hover:bg-red-500/10 rounded-xl transition-all cursor-pointer shadow-xs border border-slate-100 dark:border-zinc-800/80 shrink-0 select-none bg-white dark:bg-zinc-900 active:scale-[0.97]"
-                  title="Disconnect Cloud Backup"
-                  id="btn-disconnect-cloud-replicated"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleRegisterPasskey}
+                    disabled={authLoading}
+                    className="text-slate-500 hover:text-indigo-600 p-2 rounded-xl transition-all shadow-xs border border-slate-100 dark:border-zinc-800/80 bg-white dark:bg-zinc-900 text-xs"
+                    title="Register a passkey for this account"
+                    id="btn-register-passkey"
+                  >
+                    Register Passkey
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCloudSignOut}
+                    disabled={authLoading}
+                    className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 p-2 hover:bg-red-500/10 rounded-xl transition-all cursor-pointer shadow-xs border border-slate-100 dark:border-zinc-800/80 shrink-0 select-none bg-white dark:bg-zinc-900 active:scale-[0.97]"
+                    title="Disconnect Cloud Backup"
+                    id="btn-disconnect-cloud-replicated"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
               <p className="text-[10px] text-slate-500 dark:text-zinc-400 leading-normal leading-relaxed">
                 You are currently signed in with email/password authentication. Secure AES-256 cloud replication is healthy and active.
@@ -534,6 +634,31 @@ export default function AuthScreen({
                   disabled={loading}
                 />
               </div>
+
+              <div className="flex items-center justify-between text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => { setIsForgotModalOpen(true); setForgotError(''); setForgotSuccess(''); }}
+                  disabled={authLoading || forgotLoading}
+                  className="text-xs text-slate-500 dark:text-zinc-400 hover:text-indigo-600"
+                >
+                  Forgot password?
+                </button>
+
+                {isPasskeySupported() && (
+                  <button
+                    type="button"
+                    onClick={handleStartPasskey}
+                    disabled={authLoading}
+                    className="text-xs bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 px-3 py-1 rounded-lg hover:bg-indigo-100"
+                  >
+                    Sign in with Passkey
+                  </button>
+                )}
+              </div>
+
+              {forgotError && <div className="text-[11px] text-red-600">{forgotError}</div>}
+              {forgotSuccess && <div className="text-[11px] text-emerald-600">{forgotSuccess}</div>}
             </div>
           )}
 
