@@ -272,7 +272,7 @@ export default function App() {
                   <ShieldCheck className="w-5 h-5 text-white" />
                 </div>
                 <div className="flex flex-col leading-tight">
-                  <span className="font-extrabold text-white tracking-tight text-lg">VaultManager</span>
+                  <span className="font-extrabold text-white tracking-tight text-lg">Key Keeper</span>
                   <span className="text-[9px] font-mono text-indigo-400 font-bold uppercase tracking-wider">Cloud Synchronized</span>
                 </div>
               </div>
@@ -370,12 +370,7 @@ export default function App() {
                     <ShieldCheck className="w-5 h-5" />
                   </div>
                   <h1 className="font-sans font-black text-sm tracking-tight text-slate-900 dark:text-zinc-100">
-                    VaultManager
-                  </h1>
-                </div>
-                
-                {/* Desktop Header Description dynamic title */}
-                {isUnlocked && (
+                      Key Keeper
                   <div className="hidden lg:block text-left leading-tight">
                     <h2 className="font-bold text-slate-805 dark:text-zinc-100 text-base tracking-tight capitalize">
                       {isFormOpen ? 'Edit Item' : activeTab === 'vault' ? 'All Items' : activeTab === 'generator' ? 'Password Generator' : 'Vault Settings'}
