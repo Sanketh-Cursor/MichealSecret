@@ -227,18 +227,14 @@ export default function AuthScreen({
 
         {/* CLOUD SECURE BACKUP ACCOUNT CONTAINER */}
         <div className="bg-slate-50 dark:bg-zinc-900/40 border border-slate-150 dark:border-zinc-900 p-4 rounded-2xl flex flex-col gap-3">
-          <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-900/50 pb-2">
-            <h3 className="text-[10px] uppercase tracking-wider font-extrabold text-slate-450 dark:text-zinc-500 flex items-center gap-1.5 font-mono">
-              <CloudLightning className="w-3.5 h-3.5 text-indigo-550 dark:text-indigo-400" />
-              <span>Cloud Backup Account Registry</span>
-            </h3>
-            {user && (
+          {user && (
+            <div className="flex items-center justify-end pb-2">
               <span className="text-[9px] font-bold text-emerald-555 dark:text-emerald-400 bg-emerald-500/10 py-0.5 px-2 rounded-md flex items-center gap-1">
                 <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
                 Active Connection
               </span>
-            )}
-          </div>
+            </div>
+          )}
 
           {authError && (
             <div className="p-2.5 bg-red-50 dark:bg-red-950/20 text-red-700 dark:text-red-400 border border-red-200/50 dark:border-red-900/30 rounded-xl text-[10px] flex items-start gap-2 animate-fade-in" id="cloud-auth-error">
