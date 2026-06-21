@@ -376,6 +376,18 @@ export default function AuthScreen({
                   </>
                 )}
               </button>
+
+              {!isSignUpMode && (
+                <div className="text-center pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setIsForgotModalOpen(true)}
+                    className="text-[10px] font-bold text-slate-500 hover:text-indigo-600 transition-colors"
+                  >
+                    Forgot Account Password?
+                  </button>
+                </div>
+              )}
             </form>
           )}
         </div>
