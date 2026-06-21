@@ -433,7 +433,7 @@ export default function App() {
                 {/* When user is signed into cloud but vault is locked, ask for Master Password */}
                 <MasterPasswordModal
                   isOpen={!!user && !isUnlocked}
-                  onClose={() => { /* no-op: require unlock or sign out */ }}
+                  onClose={handleSignOut}
                   isInitialSetup={isInitialSetup}
                   user={user}
                   onUnlock={handleUnlockSuccess}

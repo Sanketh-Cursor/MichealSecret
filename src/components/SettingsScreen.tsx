@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Lock, 
   Trash2, 
@@ -16,7 +16,8 @@ import {
   VolumeX, 
   Timer, 
   FileJson,
-  RefreshCw
+  RefreshCw,
+  Fingerprint
 } from 'lucide-react';
 import { AppSettings, VaultEntry, SecureNote } from '../types';
 import { 
@@ -29,6 +30,7 @@ import {
   saveVaultEntry,
   saveSecureNote
 } from '../services/db';
+import { Capacitor } from '@capacitor/core';
 
 interface SettingsScreenProps {
   settings: AppSettings;
@@ -50,30 +52,33 @@ export default function SettingsScreen({
   const [errorMsg, setErrorMsg] = useState('');
   const [wipeConfirm, setWipeConfirm] = useState('');
   const [showWipeModal, setShowWipeModal] = useState(false);
+  const [isBiometricAvailable, setIsBiometricAvailable] = useState(false);
 
-  const handleAutoLockChange = async (duration: number) => {
-    const updated = { ...settings, autoLockDuration: duration };
-    await saveAppSettings(updated, userId);
-    onSettingsUpdate(updated);
-    showTempSuccess('Auto-lock duration updated successfully.');
+  useEffect(() => {
+    if (Capacitor.getPlatform() === 'android' || Capacitor.getPlatform() === 'ios') {
+      checkBiometrics();
+    }
+  }, []);
+
+  const checkBiometrics = async () => {
+    try {
+      const { isAvailable } = await (Capacitor.Plugins as any).BiometricAuth.checkBiometricSupport();
+      setIsBiometricAvailable(isAvailable);
+    } catch (e) {
+      console.warn("Biometrics not supported:", e);
+    }
   };
 
-  const handleThemeChange = async (theme: 'light' | 'dark') => {
-    const updated = { ...settings, theme };
-    await saveAppSettings(updated, userId);
-    onSettingsUpdate(updated);
-  };
-
-  const showTempSuccess = (msg: string) => {
-    setSuccessMsg(msg);
-    setErrorMsg('');
-    setTimeout(() => setSuccessMsg(''), 4000);
-  };
-
-  const showTempError = (msg: string) => {
-    setErrorMsg(msg);
-    setSuccessMsg('');
-    setTimeout(() => setErrorMsg(''), 4000);
+  const handleDisableBiometrics = async () => {
+    setLoading(true);
+    try {
+      await (Capacitor.Plugins as any).BiometricAuth.clearMasterPassword();
+      showTempSuccess('Biometric unlock disabled and credentials cleared.');
+    } catch (e) {
+      showTempError('Failed to clear biometric settings.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Export fully encrypted backup
@@ -283,6 +288,32 @@ export default function SettingsScreen({
           ))}
         </div>
       </div>
+
+      {/* Biometric Settings card */}
+      {isBiometricAvailable && (
+        <div className="bg-white dark:bg-zinc-950 border border-slate-250/60 dark:border-zinc-900 p-5 rounded-2xl shadow-xs">
+          <div className="flex items-center gap-2 pb-3 mb-4 border-b border-slate-100 dark:border-zinc-900">
+            <Fingerprint className="w-4.5 h-4.5 text-indigo-550 dark:text-indigo-400" />
+            <h3 className="text-sm font-semibold text-slate-800 dark:text-zinc-200">
+              Biometric Authentication
+            </h3>
+          </div>
+
+          <p className="text-xs text-slate-500 dark:text-zinc-400 mb-4 leading-relaxed">
+            Biometric unlock allows you to access your vault using your fingerprint or face recognition instead of typing your Master Password every time.
+          </p>
+
+          <button
+            onClick={handleDisableBiometrics}
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-2 bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-850 text-slate-700 dark:text-zinc-300 py-3 px-4 rounded-xl text-xs font-semibold transition-all cursor-pointer border border-slate-200 dark:border-zinc-800"
+            id="btn-settings-disable-biometric"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Disable Biometric Unlock & Clear Credentials</span>
+          </button>
+        </div>
+      )}
 
       {/* Backup Utility card */}
       <div className="bg-white dark:bg-zinc-950 border border-slate-250/60 dark:border-zinc-900 p-5 rounded-2xl shadow-xs">
