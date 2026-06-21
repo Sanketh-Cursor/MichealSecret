@@ -370,7 +370,11 @@ export default function App() {
                     <ShieldCheck className="w-5 h-5" />
                   </div>
                   <h1 className="font-sans font-black text-sm tracking-tight text-slate-900 dark:text-zinc-100">
-                      Key Keeper
+                    Key Keeper
+                  </h1>
+                </div>
+
+                {isUnlocked && (
                   <div className="hidden lg:block text-left leading-tight">
                     <h2 className="font-bold text-slate-805 dark:text-zinc-100 text-base tracking-tight capitalize">
                       {isFormOpen ? 'Edit Item' : activeTab === 'vault' ? 'All Items' : activeTab === 'generator' ? 'Password Generator' : 'Vault Settings'}
@@ -380,7 +384,7 @@ export default function App() {
                     </p>
                   </div>
                 )}
-                
+
                 {!isUnlocked && (
                   <div className="text-left leading-tight">
                     <h1 className="font-extrabold text-sm tracking-tight text-slate-900 dark:text-zinc-100">
