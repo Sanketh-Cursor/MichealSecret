@@ -387,12 +387,6 @@ export default function App() {
 
                 {!isUnlocked && (
                   <div className="text-left leading-tight">
-                    <h1 className="font-extrabold text-sm tracking-tight text-slate-900 dark:text-zinc-100">
-                      Secure Password Vault
-                    </h1>
-                    <p className="text-[9px] font-mono text-slate-400 dark:text-zinc-500 font-bold uppercase tracking-wider">
-                      Zero-Knowledge Authentication Engine
-                    </p>
                   </div>
                 )}
               </div>
