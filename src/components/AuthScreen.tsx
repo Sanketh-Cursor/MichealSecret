@@ -176,15 +176,15 @@ export default function AuthScreen({
     <div className="flex flex-col items-center justify-center min-h-[80vh] px-4 py-8 animate-fade-in" id="auth-screen">
       <div className="w-full max-w-md bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-900 rounded-3xl shadow-xl overflow-hidden p-6 md:p-8 space-y-6">
         
-        {/* Shield Visual Header */}
+        {/* Shield Visual Header (Logo Area) */}
         <div className="text-center space-y-2 select-none">
-          <div className="inline-flex items-center justify-center p-4 bg-indigo-50 dark:bg-indigo-950/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 text-indigo-600 dark:text-indigo-400 mb-2">
-            <Shield className="w-8 h-8 animate-pulse" />
+          <div className="inline-flex items-center justify-center p-4 bg-indigo-50 dark:bg-indigo-950/20 rounded-3xl border border-indigo-100 dark:border-indigo-900/40 text-indigo-600 dark:text-indigo-400 mb-2 shadow-sm">
+            <ShieldCheck className="w-10 h-10 animate-pulse" />
           </div>
-          <h1 className="text-xl md:text-2xl font-extrabold font-sans tracking-tight text-slate-900 dark:text-zinc-50">
-            Cloud Authentication
+          <h1 className="text-2xl md:text-3xl font-black font-sans tracking-tight text-slate-900 dark:text-zinc-50">
+            Key Keeper
           </h1>
-          <p className="text-xs text-slate-500 dark:text-zinc-400 max-w-xs mx-auto">
+          <p className="text-xs font-medium text-slate-500 dark:text-zinc-400 max-w-xs mx-auto">
             Sign in to your cloud account to sync and access your vault. Master Password will be requested after login.
           </p>
         </div>
@@ -382,18 +382,6 @@ export default function AuthScreen({
               </button>
             </form>
           )}
-        </div>
-
-        
-
-        {/* Cryptography Compliance Footer */}
-        <div className="bg-slate-50 dark:bg-zinc-900/40 border border-slate-150 dark:border-zinc-900 p-4 rounded-2xl space-y-1.5 select-none">
-          <h3 className="text-[9px] uppercase tracking-wider font-extrabold text-slate-400 dark:text-zinc-500">
-            Zero-Knowledge Cryptography compliance
-          </h3>
-          <p className="text-[10px] text-slate-500 dark:text-zinc-400 leading-normal font-sans">
-            Authentication performs identity verification via <b>your secure User ID and Password</b>. Encryption executes inside your sandbox using derived keys with 600,000-round <b>PBKDF2-HMAC-SHA256</b> and 256-bit symmetric tags (<b>AES-GCM</b>). The cloud provider cannot view or access your secrets.
-          </p>
         </div>
 
       </div>
