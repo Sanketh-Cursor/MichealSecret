@@ -1,12 +1,12 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { generateRegistrationOptions } from '@simplewebauthn/server';
+import { toBase64Url } from '../helpers';
 import { saveRegisterSession } from '../utils';
 
 const rpName = 'KeyKeeper';
 const rpID = process.env.NEXT_PUBLIC_APP_URL ? new URL(process.env.NEXT_PUBLIC_APP_URL).hostname : 'localhost';
 const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
-export default function handler(request: VercelRequest, response: VercelResponse) {
+export default async function handler(request: any, response: any) {
   if (request.method !== 'POST') {
     response.status(405).json({ error: 'Method not allowed' });
     return;
@@ -18,7 +18,7 @@ export default function handler(request: VercelRequest, response: VercelResponse
     return;
   }
 
-  const userId = Buffer.from(email, 'utf8').toString('base64url');
+  const userId = toBase64Url(Buffer.from(email, 'utf8'));
   const registrationOptions = generateRegistrationOptions({
     rpName,
     rpID,
@@ -33,6 +33,6 @@ export default function handler(request: VercelRequest, response: VercelResponse
     excludeCredentials: [],
   });
 
-  saveRegisterSession(email, registrationOptions);
+  await saveRegisterSession(email, registrationOptions);
   response.status(200).json({ publicKey: registrationOptions });
 }

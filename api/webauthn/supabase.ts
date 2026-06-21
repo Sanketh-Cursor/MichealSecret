@@ -17,8 +17,8 @@ export interface PasskeySessionRecord {
 }
 
 export interface StoredCredentialRecord {
-  id: string;
-  email: string;
+  id?: string;
+  email?: string;
   credential_id: string;
   public_key: string;
   counter: number;
@@ -32,7 +32,7 @@ export async function savePasskeySession(email: string, challenge: string, type:
     email,
     challenge,
     type,
-  }, { onConflict: ['email', 'type'] });
+  }, { onConflict: 'email,type' });
   if (error) throw error;
 }
 
@@ -47,7 +47,15 @@ export async function deletePasskeySession(email: string, type: 'registration' |
   if (error) throw error;
 }
 
-export async function addPasskeyCredential(email: string, credential: Omit<StoredCredentialRecord, 'id' | 'created_at'>) {
+export type PasskeyCredentialInsert = {
+  credential_id: string;
+  public_key: string;
+  counter: number;
+  transports: string | null;
+  user_handle: string | null;
+};
+
+export async function addPasskeyCredential(email: string, credential: PasskeyCredentialInsert) {
   const { error } = await supabase.from('webauthn_credentials').upsert({
     email,
     credential_id: credential.credential_id,
@@ -55,12 +63,20 @@ export async function addPasskeyCredential(email: string, credential: Omit<Store
     counter: credential.counter,
     transports: credential.transports,
     user_handle: credential.user_handle,
-  }, { onConflict: ['email', 'credential_id'] });
+  }, { onConflict: 'email,credential_id' });
+  if (error) throw error;
+}
+
+export async function updatePasskeyCredentialCounter(email: string, credentialId: string, counter: number) {
+  const { error } = await supabase.from('webauthn_credentials')
+    .update({ counter })
+    .eq('email', email)
+    .eq('credential_id', credentialId);
   if (error) throw error;
 }
 
 export async function getPasskeyCredentials(email: string): Promise<StoredCredentialRecord[]> {
   const { data, error } = await supabase.from('webauthn_credentials').select('credential_id,public_key,counter,transports,user_handle').eq('email', email);
   if (error) throw error;
-  return data || [];
+  return (data as StoredCredentialRecord[]) || [];
 }

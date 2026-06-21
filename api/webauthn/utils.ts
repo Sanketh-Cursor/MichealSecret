@@ -1,4 +1,4 @@
-import { getPasskeySession, savePasskeySession, deletePasskeySession, addPasskeyCredential, getPasskeyCredentials } from './supabase';
+import { getPasskeySession, savePasskeySession, deletePasskeySession, addPasskeyCredential, getPasskeyCredentials, updatePasskeyCredentialCounter } from './supabase';
 
 export interface StoredCredential {
   credentialId: string;
@@ -36,6 +36,10 @@ export async function addCredential(email: string, credential: StoredCredential)
   });
 }
 
+export async function updateCredentialCounter(email: string, credentialId: string, counter: number) {
+  await updatePasskeyCredentialCounter(email, credentialId, counter);
+}
+
 export async function getCredentials(email: string): Promise<StoredCredential[]> {
   const rows = await getPasskeyCredentials(email);
   return rows.map((row) => ({
@@ -45,6 +49,10 @@ export async function getCredentials(email: string): Promise<StoredCredential[]>
     transports: row.transports ? row.transports.split(',') : undefined,
     userHandle: row.user_handle || '',
   }));
+}
+
+export async function deleteSession(email: string, type: 'registration' | 'authentication') {
+  await deletePasskeySession(email, type);
 }
 
 export async function clearSession(email: string) {

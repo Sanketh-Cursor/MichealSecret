@@ -1,11 +1,10 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { generateAuthenticationOptions } from '@simplewebauthn/server';
 import { getCredentials, saveAuthenticationSession } from '../utils';
 
 const rpID = process.env.NEXT_PUBLIC_APP_URL ? new URL(process.env.NEXT_PUBLIC_APP_URL).hostname : 'localhost';
 const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
-export default function handler(request: VercelRequest, response: VercelResponse) {
+export default async function handler(request: any, response: any) {
   if (request.method !== 'POST') {
     response.status(405).json({ error: 'Method not allowed' });
     return;
@@ -17,7 +16,7 @@ export default function handler(request: VercelRequest, response: VercelResponse
     return;
   }
 
-  const credentials = getCredentials(email);
+  const credentials = await getCredentials(email);
   if (credentials.length === 0) {
     response.status(404).json({ error: 'No passkeys registered for this email' });
     return;
@@ -35,6 +34,6 @@ export default function handler(request: VercelRequest, response: VercelResponse
     rpID,
   });
 
-  saveAuthenticationSession(email, options);
+  await saveAuthenticationSession(email, options);
   response.status(200).json({ publicKey: options });
 }

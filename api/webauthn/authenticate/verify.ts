@@ -1,11 +1,11 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { verifyAuthenticationResponse } from '@simplewebauthn/server';
-import { getAuthenticationSession, getCredentials } from '../utils';
+import { fromBase64Url } from '../helpers';
+import { getAuthenticationSession, getCredentials, updateCredentialCounter, deleteSession } from '../utils';
 
 const rpID = process.env.NEXT_PUBLIC_APP_URL ? new URL(process.env.NEXT_PUBLIC_APP_URL).hostname : 'localhost';
 const origin = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
-export default async function handler(request: VercelRequest, response: VercelResponse) {
+export default async function handler(request: any, response: any) {
   if (request.method !== 'POST') {
     response.status(405).json({ error: 'Method not allowed' });
     return;
@@ -17,13 +17,13 @@ export default async function handler(request: VercelRequest, response: VercelRe
     return;
   }
 
-  const expectedAuth = getAuthenticationSession(email);
+  const expectedAuth = await getAuthenticationSession(email);
   if (!expectedAuth) {
     response.status(400).json({ error: 'No authentication session found' });
     return;
   }
 
-  const credentials = getCredentials(email);
+  const credentials = await getCredentials(email);
   const storedCredential = credentials.find((cred) => cred.credentialId === assertion.id);
   if (!storedCredential) {
     response.status(404).json({ error: 'Credential not registered' });
@@ -38,7 +38,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
       expectedRPID: rpID,
       authenticator: {
         credentialPublicKey: Buffer.from(storedCredential.publicKey, 'base64'),
-        credentialID: storedCredential.credentialId,
+        credentialID: fromBase64Url(storedCredential.credentialId),
         counter: storedCredential.counter,
       },
     });
@@ -47,7 +47,9 @@ export default async function handler(request: VercelRequest, response: VercelRe
       throw new Error('Authentication verification failed');
     }
 
-    storedCredential.counter = verification.authenticationInfo.newCounter;
+    await updateCredentialCounter(email, storedCredential.credentialId, verification.authenticationInfo.newCounter);
+    await deleteSession(email, 'authentication');
+
     response.status(200).json({ verified: true });
   } catch (err: any) {
     console.error(err);
