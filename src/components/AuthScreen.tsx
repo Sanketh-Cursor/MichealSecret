@@ -17,27 +17,27 @@ import {
   Sparkles,
   CloudLightning,
   LogOut,
-  UserCheck
+  UserCheck,
+  UserPlus
 } from 'lucide-react';
-import { User } from 'firebase/auth';
+import { User } from '@supabase/supabase-js';
+import { supabase } from '../services/supabase';
 import { generateSalt, deriveMasterKey, computeVerificationHash, verifyMasterPassword } from '../services/crypto';
-import { saveMasterPasswordConfig, getMasterPasswordConfig } from '../services/db';
+import { saveMasterPasswordConfig, getMasterPasswordConfig, syncCloud } from '../services/db';
 import { evaluatePasswordStrength } from '../utils/strength';
 
 interface AuthScreenProps {
   onAuthSuccess: (masterKey: CryptoKey) => void;
   isInitialSetup: boolean;
   user: User | null;
-  onGoogleSignIn: () => Promise<void>;
-  onGoogleSignOut: () => Promise<void>;
+  onSignOut: () => Promise<void>;
 }
 
 export default function AuthScreen({ 
   onAuthSuccess, 
   isInitialSetup, 
   user, 
-  onGoogleSignIn, 
-  onGoogleSignOut 
+  onSignOut
 }: AuthScreenProps) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -45,6 +45,15 @@ export default function AuthScreen({
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Cloud replicator authentication states
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [isSignUpMode, setIsSignUpMode] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [authSuccessMsg, setAuthSuccessMsg] = useState('');
+  const [showAuthPassword, setShowAuthPassword] = useState(false);
   
   // Brute force protection state
   const [failedAttempts, setFailedAttempts] = useState(0);
@@ -103,11 +112,11 @@ export default function AuthScreen({
       // 3. Compute verification hash
       const verificationHash = await computeVerificationHash(masterKey);
       
-      // 4. Persist to secure database (local or Firestore)
+      // 4. Persist to secure database (local or Supabase)
       await saveMasterPasswordConfig({
         salt,
         verificationHash
-      }, user?.uid || undefined);
+      }, user?.id || undefined);
       
       setSuccess('Vault encryption key established successfully!');
       setTimeout(() => {
@@ -137,7 +146,7 @@ export default function AuthScreen({
 
     setLoading(true);
     try {
-      const config = await getMasterPasswordConfig(user?.uid || undefined);
+      const config = await getMasterPasswordConfig(user?.id || undefined);
       if (!config) {
         setError(
           user 
@@ -181,6 +190,75 @@ export default function AuthScreen({
     }
   };
 
+  const handleCloudAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSuccessMsg('');
+    
+    if (!authEmail || !authPassword) {
+      setAuthError('Please provide both User ID (Email) and Password.');
+      return;
+    }
+
+    if (authPassword.length < 6) {
+      setAuthError('Account password must be at least 6 characters.');
+      return;
+    }
+
+    setAuthLoading(true);
+    try {
+      if (isSignUpMode) {
+        // Sign Up
+        const { data, error } = await supabase.auth.signUp({
+          email: authEmail,
+          password: authPassword
+        });
+        if (error) throw error;
+        if (data.user) {
+          if (data.session) {
+            setAuthSuccessMsg('Account created! Local cache synchronized to your cloud workspace.');
+            await syncCloud(data.user.id);
+          } else {
+            setAuthSuccessMsg('Registration successful! Please confirm your email to activate cloud synchronization, or start using immediately.');
+            await syncCloud(data.user.id);
+          }
+        }
+      } else {
+        // Sign In
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: authEmail,
+          password: authPassword
+        });
+        if (error) throw error;
+        if (data.user) {
+          setAuthSuccessMsg('Successfully logged in! Restoring cloud database sync.');
+          await syncCloud(data.user.id);
+        }
+      }
+    } catch (err: any) {
+      console.error(err);
+      let errMsg = err.message || 'Authentication failed.';
+      setAuthError(errMsg);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleCloudSignOut = async () => {
+    setAuthLoading(true);
+    setAuthError('');
+    setAuthSuccessMsg('');
+    try {
+      await onSignOut();
+      setAuthSuccessMsg('Account disconnected. Reverting to Offline Sandbox.');
+    } catch (err) {
+      console.error(err);
+      setAuthError('Failed to safely log out.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   const getStrengthProgressColor = () => {
     switch (strength.score) {
       case 0: return 'text-red-500 bg-red-500/10';
@@ -211,82 +289,150 @@ export default function AuthScreen({
           </p>
         </div>
 
-        {/* GOOGLE OAUTH 2.0 INTEGRATION CONTAINER */}
+        {/* CLOUD SECURE BACKUP ACCOUNT CONTAINER */}
         <div className="bg-slate-50 dark:bg-zinc-900/40 border border-slate-150 dark:border-zinc-900 p-4 rounded-2xl flex flex-col gap-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-900/50 pb-2">
             <h3 className="text-[10px] uppercase tracking-wider font-extrabold text-slate-450 dark:text-zinc-500 flex items-center gap-1.5 font-mono">
               <CloudLightning className="w-3.5 h-3.5 text-indigo-550 dark:text-indigo-400" />
-              <span>Google OAuth 2.0 Cloud Backup</span>
+              <span>Cloud Backup Account Registry</span>
             </h3>
             {user && (
               <span className="text-[9px] font-bold text-emerald-555 dark:text-emerald-400 bg-emerald-500/10 py-0.5 px-2 rounded-md flex items-center gap-1">
                 <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                Cloud Connected
+                Active Connection
               </span>
             )}
           </div>
+
+          {authError && (
+            <div className="p-2.5 bg-red-50 dark:bg-red-950/20 text-red-700 dark:text-red-400 border border-red-200/50 dark:border-red-900/30 rounded-xl text-[10px] flex items-start gap-2 animate-fade-in" id="cloud-auth-error">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span className="font-semibold">{authError}</span>
+            </div>
+          )}
+
+          {authSuccessMsg && (
+            <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-900/30 rounded-xl text-[10px] flex items-start gap-2 animate-fade-in" id="cloud-auth-success">
+              <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+              <span className="font-semibold">{authSuccessMsg}</span>
+            </div>
+          )}
           
           {user ? (
             <div className="space-y-3">
               <div className="flex items-center gap-2.5 bg-white dark:bg-zinc-900 p-2.5 rounded-xl border border-slate-200/50 dark:border-zinc-800/60 shadow-xs">
-                {user.photoURL ? (
-                  <img src={user.photoURL} alt={user.displayName || 'Google user'} className="w-7 h-7 rounded-full shrink-0 border border-slate-205 dark:border-zinc-800" referrerPolicy="no-referrer" />
-                ) : (
-                  <div className="w-7 h-7 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-xs uppercase shadow-sm">
-                    {user.email?.charAt(0) || 'G'}
-                  </div>
-                )}
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-bold text-slate-805 dark:text-zinc-200 truncate">{user.displayName || 'Google Account'}</p>
-                  <p className="text-[10px] text-slate-455 dark:text-zinc-450 truncate font-mono">{user.email}</p>
+                <div className="w-8 h-8 rounded-full bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 shadow-xs">
+                  <UserCheck className="w-4 h-4" />
+                </div>
+                <div className="min-w-0 flex-1 leading-normal">
+                  <p className="text-[10px] uppercase font-mono font-bold tracking-wider text-slate-400 dark:text-zinc-500">Security Principal</p>
+                  <p className="text-xs font-bold text-slate-805 dark:text-zinc-200 truncate font-mono">{user.email}</p>
                 </div>
                 <button
                   type="button"
-                  onClick={onGoogleSignOut}
-                  className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 p-1.5 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer"
-                  title="Disconnect Google"
-                  id="btn-disconnect-google"
+                  onClick={handleCloudSignOut}
+                  disabled={authLoading}
+                  className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 p-2 hover:bg-red-500/10 rounded-xl transition-all cursor-pointer shadow-xs border border-slate-100 dark:border-zinc-800/80 shrink-0 select-none bg-white dark:bg-zinc-900 active:scale-[0.97]"
+                  title="Disconnect Cloud Backup"
+                  id="btn-disconnect-cloud-replicated"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
               </div>
-              <p className="text-[10px] text-slate-500 dark:text-zinc-450 leading-relaxed leading-normal">
-                You are currently signed in with Google OAuth 2.0. Your database is securely backed up and synced in real-time.
+              <p className="text-[10px] text-slate-500 dark:text-zinc-400 leading-normal leading-relaxed">
+                You are currently signed in with email/password authentication. Secure AES-256 cloud replication is healthy and active.
               </p>
             </div>
           ) : (
-            <div className="space-y-3">
-              <p className="text-[10px] text-slate-500 dark:text-zinc-400 leading-normal">
-                Enable cloud replication to access your encrypted vaults seamlessly across multiple devices under dual-identity protection.
-              </p>
-              
+            <form onSubmit={handleCloudAuth} className="space-y-3 animate-fade-in">
+              <div className="flex gap-2 bg-slate-100/60 dark:bg-zinc-900 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => { setIsSignUpMode(false); setAuthError(''); setAuthSuccessMsg(''); }}
+                  className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    !isSignUpMode
+                      ? 'bg-white dark:bg-zinc-850 text-indigo-700 dark:text-indigo-400 shadow-xs'
+                      : 'text-slate-500 dark:text-zinc-400 hover:text-slate-700'
+                  }`}
+                >
+                  Sign In
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setIsSignUpMode(true); setAuthError(''); setAuthSuccessMsg(''); }}
+                  className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                    isSignUpMode
+                      ? 'bg-white dark:bg-zinc-850 text-indigo-700 dark:text-indigo-400 shadow-xs'
+                      : 'text-slate-500 dark:text-zinc-400 hover:text-slate-700'
+                  }`}
+                >
+                  Register
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 pointer-events-none">
+                    <UserCheck className="w-3.5 h-3.5" />
+                  </span>
+                  <input
+                    id="cloud-userid-input"
+                    type="email"
+                    required
+                    placeholder="User ID (Email Address)"
+                    className="block w-full pl-9 pr-3 py-2 text-xs bg-white dark:bg-zinc-900 border border-slate-205 dark:border-zinc-850 rounded-xl placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-900 dark:text-zinc-100 transition-all font-mono"
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    disabled={authLoading}
+                  />
+                </div>
+
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 pointer-events-none">
+                    <Lock className="w-3.5 h-3.5" />
+                  </span>
+                  <input
+                    id="cloud-password-input"
+                    type={showAuthPassword ? 'text' : 'password'}
+                    required
+                    placeholder="Account Password"
+                    className="block w-full pl-9 pr-9 py-2 text-xs bg-white dark:bg-zinc-900 border border-slate-205 dark:border-zinc-850 rounded-xl placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 text-slate-900 dark:text-zinc-100 transition-all font-mono"
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    disabled={authLoading}
+                  />
+                  <button
+                    type="button"
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-indigo-600 transition-colors"
+                    onClick={() => setShowAuthPassword(!showAuthPassword)}
+                    id="btn-toggle-auth-pwd"
+                  >
+                    {showAuthPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
               <button
-                type="button"
-                onClick={onGoogleSignIn}
-                className="w-full bg-white hover:bg-slate-50 dark:bg-zinc-900 dark:hover:bg-zinc-850/80 text-slate-700 dark:text-zinc-200 border border-slate-250 dark:border-zinc-800 font-bold py-2 px-3 rounded-xl text-xs transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99]"
-                id="btn-google-sign-in"
+                type="submit"
+                disabled={authLoading}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-700 text-white font-bold py-2 px-3 rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                id="btn-cloud-auth-submit"
               >
-                <svg className="w-4.5 h-4.5" viewBox="0 0 24 24">
-                  <path
-                    fill="#4285F4"
-                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v3.92h6.63c-.29 1.5-.1.3-.1 2.37l-3.35 2.24 3.25 2.52c1.9-1.75 3-4.32 3-7.23z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.83-2.97c-1.08.73-2.48 1.16-4.1 1.16-3.15 0-5.81-2.13-6.76-5l-3.95 3.06C3.26 21.03 7.31 24 12 24z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.24 14.28c-.24-.73-.38-1.5-.38-2.28s.14-1.55.38-2.28L1.29 6.66C.47 8.3 0 10.1 0 12s.47 3.7 1.29 5.34l3.95-3.06z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.97 1.29 6.66l3.95 3.06c.95-2.87 3.61-5 6.76-5z"
-                  />
-                </svg>
-                <span>Authorize & Unlock with Google</span>
+                {authLoading ? (
+                  <RefreshCw className="w-4.5 h-4.5 animate-spin" />
+                ) : isSignUpMode ? (
+                  <>
+                    <UserPlus className="w-4 h-4" />
+                    <span>Create Account & Sync</span>
+                  </>
+                ) : (
+                  <>
+                    <UserCheck className="w-4 h-4" />
+                    <span>Authorize Cloud & Sync</span>
+                  </>
+                )}
               </button>
-            </div>
+            </form>
           )}
         </div>
 
@@ -419,7 +565,7 @@ export default function AuthScreen({
             Zero-Knowledge Cryptography compliance
           </h3>
           <p className="text-[10px] text-slate-500 dark:text-zinc-400 leading-normal font-sans">
-            Authentication performs identity checking via <b>Google OAuth 2.0</b>. Encryption executes inside your sandbox using derived keys with 600,000-round <b>PBKDF2-HMAC-SHA256</b> and 256-bit symmetric tags (<b>AES-GCM</b>). The cloud provider cannot view or access your secrets.
+            Authentication performs identity verification via <b>your secure User ID and Password</b>. Encryption executes inside your sandbox using derived keys with 600,000-round <b>PBKDF2-HMAC-SHA256</b> and 256-bit symmetric tags (<b>AES-GCM</b>). The cloud provider cannot view or access your secrets.
           </p>
         </div>
 

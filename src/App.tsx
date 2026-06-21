@@ -17,7 +17,11 @@ import {
   Sliders,
   Database
 } from 'lucide-react';
-import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
+import { User } from '@supabase/supabase-js';
+
+interface CompatUser extends User {
+  uid: string;
+}
 
 import { AppSettings, VaultEntry, SecureNote } from './types';
 import { 
@@ -29,9 +33,9 @@ import {
   saveSecureNote, 
   deleteVaultEntry, 
   deleteSecureNote,
-  syncLocalToFirebase
+  syncCloud
 } from './services/db';
-import { auth, googleProvider } from './services/firebase';
+import { supabase } from './services/supabase';
 
 // Subcomponents
 import AuthScreen from './components/AuthScreen';
@@ -47,8 +51,8 @@ export default function App() {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [masterKey, setMasterKey] = useState<CryptoKey | null>(null);
 
-  // Firebase Auth state
-  const [user, setUser] = useState<User | null>(null);
+  // Supabase Auth state
+  const [user, setUser] = useState<CompatUser | null>(null);
 
   // App settings state
   const [settings, setSettings] = useState<AppSettings>({
@@ -72,21 +76,31 @@ export default function App() {
   // Activity tracking
   const lastActiveRef = useRef<number>(Date.now());
 
-  // 1. Listen to Firebase Auth state shifts and load corresponding configuration
+  // 1. Listen to Supabase Auth state shifts and load corresponding configuration
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
+    // Initial user check
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const currentUser = session?.user || null;
+      const compatUser = currentUser ? { ...currentUser, uid: currentUser.id } as CompatUser : null;
+      setUser(compatUser);
+      setDbChecking(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const currentUser = session?.user || null;
+      const compatUser = currentUser ? { ...currentUser, uid: currentUser.id } as CompatUser : null;
+      setUser(compatUser);
       try {
-        const config = await getMasterPasswordConfig(currentUser?.uid || undefined);
+        const config = await getMasterPasswordConfig(compatUser?.uid || undefined);
         setIsInitialSetup(!config);
 
-        const loadedSettings = await getAppSettings(currentUser?.uid || undefined);
+        const loadedSettings = await getAppSettings(compatUser?.uid || undefined);
         setSettings(loadedSettings);
 
         // If currently unlocked, swap lists to current auth partition
         if (isUnlocked && masterKey) {
-          const allEntries = await getVaultEntries(currentUser?.uid || undefined);
-          const allNotes = await getSecureNotes(currentUser?.uid || undefined);
+          const allEntries = await getVaultEntries(compatUser?.uid || undefined);
+          const allNotes = await getSecureNotes(compatUser?.uid || undefined);
           setEntries(allEntries);
           setNotes(allNotes);
         }
@@ -97,7 +111,9 @@ export default function App() {
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+    };
   }, [isUnlocked, masterKey]);
 
   // Sync index.html root body dark theme class
@@ -196,30 +212,14 @@ export default function App() {
     setActiveTab('vault');
   };
 
-  // Google OAuth 2.0 Auth Actions
-  const handleGoogleSignIn = async () => {
-    try {
-      setDbChecking(true);
-      const result = await signInWithPopup(auth, googleProvider);
-      if (result.user) {
-        console.log("Successfully logged in via Google OAuth:", result.user.email);
-        // Force synchronous backup migrations from local IndexedDB cache on first login
-        await syncLocalToFirebase(result.user.uid);
-      }
-    } catch (err) {
-      console.error("Google Auth failed:", err);
-    } finally {
-      setDbChecking(false);
-    }
-  };
-
-  const handleGoogleSignOut = async () => {
+  // Account Auth Actions
+  const handleSignOut = async () => {
     try {
       setDbChecking(true);
       handleLockVault();
-      await signOut(auth);
+      await supabase.auth.signOut();
     } catch (err) {
-      console.error("Google disconnect error:", err);
+      console.error("Disconnect error:", err);
     } finally {
       setDbChecking(false);
     }
@@ -272,7 +272,7 @@ export default function App() {
                 </div>
                 <div className="flex flex-col leading-tight">
                   <span className="font-extrabold text-white tracking-tight text-lg">VaultManager</span>
-                  <span className="text-[9px] font-mono text-indigo-400 font-bold uppercase tracking-wider">With OAuth 2.0</span>
+                  <span className="text-[9px] font-mono text-indigo-400 font-bold uppercase tracking-wider">Cloud Synchronized</span>
                 </div>
               </div>
               <nav className="px-4 py-6 space-y-1">
@@ -317,25 +317,21 @@ export default function App() {
               </nav>
             </div>
 
-            {/* User profile details in sidebar if logged in via Google Auth */}
+            {/* User profile details in sidebar if logged in */}
             <div className="p-4 space-y-3">
               {user && (
                 <div className="bg-slate-800/60 p-3 rounded-xl border border-slate-700/50 flex items-center gap-2.5">
-                  {user.photoURL ? (
-                    <img src={user.photoURL} alt={user.displayName || 'Google user'} className="w-8 h-8 rounded-full border border-slate-700 shrink-0" referrerPolicy="no-referrer" />
-                  ) : (
-                    <div className="w-8 h-8 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
-                      {user.displayName?.charAt(0) || 'G'}
-                    </div>
-                  )}
+                  <div className="w-8 h-8 rounded-full bg-indigo-600/20 text-indigo-400 text-xs font-bold flex items-center justify-center shrink-0 border border-indigo-500/20">
+                    {user.email?.charAt(0).toUpperCase() || 'U'}
+                  </div>
                   <div className="min-w-0 flex-1 leading-normal">
-                    <p className="text-xs font-bold text-white truncate">{user.displayName || 'Client profile'}</p>
-                    <p className="text-[9px] text-indigo-400 truncate font-mono">{user.email}</p>
+                    <p className="text-xs font-bold text-white truncate">{user.email?.split('@')[0] || 'Client Profile'}</p>
+                    <p className="text-[10px] text-indigo-400 truncate font-mono">{user.email}</p>
                   </div>
                   <button
-                    onClick={handleGoogleSignOut}
+                    onClick={handleSignOut}
                     className="text-slate-400 hover:text-red-400 transition-colors p-1"
-                    title="Sign Out Google"
+                    title="Sign Out Account"
                     id="btn-sidebar-signout"
                   >
                     <LogOut className="w-3.5 h-3.5" />
@@ -431,8 +427,7 @@ export default function App() {
                 onAuthSuccess={handleUnlockSuccess} 
                 isInitialSetup={isInitialSetup} 
                 user={user}
-                onGoogleSignIn={handleGoogleSignIn}
-                onGoogleSignOut={handleGoogleSignOut}
+                onSignOut={handleSignOut}
               />
             ) : (
               <div className="space-y-6">

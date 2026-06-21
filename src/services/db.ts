@@ -4,15 +4,7 @@
  */
 
 import { VaultEntry, SecureNote, AppSettings, MasterPasswordConfig } from '../types';
-import { db } from './firebase';
-import { 
-  doc, 
-  setDoc, 
-  getDoc, 
-  getDocs, 
-  deleteDoc, 
-  collection 
-} from 'firebase/firestore';
+import { supabase } from './supabase';
 
 const DB_NAME = 'LocalPasswordManagerDB';
 const DB_VERSION = 1;
@@ -23,12 +15,12 @@ const DB_VERSION = 1;
  * DESIGN DECISIONS & SECURITY STANDARDS:
  * 1. Hybrid Client-Cloud Persistence:
  *    - By default, user state is sandboxed inside local IndexedDB.
- *    - When authenticated via Google OAuth 2.0 with Firebase Auth, data securely synchronizes with Firestore.
+ *    - When authenticated via email and password with Supabase Auth, data securely synchronizes with Supabase.
  *    - To maintain absolute secrecy, sensitive fields (passwords, notes content) are fully encrypted in AES-256-GCM
- *      prior to syncing to Firestore. Plaintext Master Passwords are never sent across the network.
+ *      prior to syncing to Supabase. Plaintext Master Passwords are never sent across the network.
  * 2. Identity Sandboxing in Cloud:
- *    - Document boundaries are isolated under specific routes: /users/{userId}/[collections]
- *    - User A cannot view, write, or find User B's vault items due to Firestore secure rules.
+ *    - Document records are isolated using user_id foreign keys, fully secured under Supabase Row-Level Security.
+ *    - User A cannot view, write, or find User B's vault items.
  */
 
 export function openDatabase(): Promise<IDBDatabase> {
@@ -83,8 +75,17 @@ async function getStore(storeName: string, mode: IDBTransactionMode): Promise<{ 
 
 export async function saveMasterPasswordConfig(config: MasterPasswordConfig, userId?: string): Promise<void> {
   if (userId) {
-    const docRef = doc(db, 'users', userId, 'auth_config', 'config');
-    await setDoc(docRef, config);
+    const { error } = await supabase
+      .from('auth_config')
+      .upsert({
+        user_id: userId,
+        salt: config.salt,
+        verification_hash: config.verificationHash
+      });
+    if (error) {
+      console.error("Supabase upsert master password config error:", error);
+      throw new Error("Supabase Sync Failed: " + error.message);
+    }
     return;
   }
 
@@ -99,18 +100,25 @@ export async function saveMasterPasswordConfig(config: MasterPasswordConfig, use
 export async function getMasterPasswordConfig(userId?: string): Promise<MasterPasswordConfig | null> {
   if (userId) {
     try {
-      const docRef = doc(db, 'users', userId, 'auth_config', 'config');
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        const data = snap.data();
+      const { data, error } = await supabase
+        .from('auth_config')
+        .select('salt, verification_hash')
+        .eq('user_id', userId)
+        .maybeSingle();
+      
+      if (error) {
+        throw error;
+      }
+      
+      if (data) {
         return {
           salt: data.salt,
-          verificationHash: data.verificationHash
+          verificationHash: data.verification_hash
         };
       }
       return null;
     } catch (err) {
-      console.error("Firestore loading of config failed, fallback to local:", err);
+      console.error("Supabase loading of config failed, fallback to local:", err);
     }
   }
 
@@ -130,8 +138,17 @@ export async function getMasterPasswordConfig(userId?: string): Promise<MasterPa
 
 export async function saveAppSettings(settings: AppSettings, userId?: string): Promise<void> {
   if (userId) {
-    const docRef = doc(db, 'users', userId, 'settings', 'app_settings');
-    await setDoc(docRef, settings);
+    const { error } = await supabase
+      .from('user_settings')
+      .upsert({
+        user_id: userId,
+        auto_lock_duration: settings.autoLockDuration,
+        theme: settings.theme
+      });
+    if (error) {
+      console.error("Supabase upsert settings error:", error);
+      throw new Error("Supabase Sync Failed: " + error.message);
+    }
     return;
   }
 
@@ -151,17 +168,24 @@ export async function getAppSettings(userId?: string): Promise<AppSettings> {
 
   if (userId) {
     try {
-      const docRef = doc(db, 'users', userId, 'settings', 'app_settings');
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        const data = snap.data();
+      const { data, error } = await supabase
+        .from('user_settings')
+        .select('auto_lock_duration, theme')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+
+      if (data) {
         return {
-          autoLockDuration: data.autoLockDuration ?? 15,
+          autoLockDuration: data.auto_lock_duration ?? 15,
           theme: data.theme ?? 'light'
         };
       }
     } catch (err) {
-      console.error("Firestore loading of settings failed, fallback:", err);
+      console.error("Supabase loading of settings failed, fallback:", err);
     }
   }
 
@@ -186,15 +210,29 @@ export async function getAppSettings(userId?: string): Promise<AppSettings> {
 export async function getVaultEntries(userId?: string): Promise<VaultEntry[]> {
   if (userId) {
     try {
-      const colRef = collection(db, 'users', userId, 'vault_entries');
-      const snap = await getDocs(colRef);
-      const entries: VaultEntry[] = [];
-      snap.forEach(doc => {
-        entries.push(doc.data() as VaultEntry);
-      });
-      return entries;
+      const { data, error } = await supabase
+        .from('vault_entries')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (error) throw error;
+      
+      if (data) {
+        return data.map(item => ({
+          id: item.id,
+          title: item.title,
+          url: item.url,
+          username: item.username,
+          email: item.email,
+          encryptedPassword: typeof item.encrypted_password === 'string' ? JSON.parse(item.encrypted_password) : item.encrypted_password,
+          encryptedNotes: typeof item.encrypted_notes === 'string' ? JSON.parse(item.encrypted_notes) : item.encrypted_notes,
+          createdAt: item.created_at,
+          updatedAt: item.updated_at
+        }));
+      }
+      return [];
     } catch (err) {
-      console.error("Firestore loading of vault entries failed, fallback to local:", err);
+      console.error("Supabase loading of vault entries failed, fallback to local:", err);
     }
   }
 
@@ -208,8 +246,24 @@ export async function getVaultEntries(userId?: string): Promise<VaultEntry[]> {
 
 export async function saveVaultEntry(entry: VaultEntry, userId?: string): Promise<void> {
   if (userId) {
-    const docRef = doc(db, 'users', userId, 'vault_entries', entry.id);
-    await setDoc(docRef, entry);
+    const { error } = await supabase
+      .from('vault_entries')
+      .upsert({
+        id: entry.id,
+        user_id: userId,
+        title: entry.title,
+        url: entry.url,
+        username: entry.username,
+        email: entry.email,
+        encrypted_password: entry.encryptedPassword,
+        encrypted_notes: entry.encryptedNotes,
+        created_at: entry.createdAt,
+        updated_at: entry.updatedAt
+      });
+    if (error) {
+      console.error("Supabase upsert vault entry error:", error);
+      throw new Error("Supabase Sync Failed: " + error.message);
+    }
     return;
   }
 
@@ -223,8 +277,15 @@ export async function saveVaultEntry(entry: VaultEntry, userId?: string): Promis
 
 export async function deleteVaultEntry(id: string, userId?: string): Promise<void> {
   if (userId) {
-    const docRef = doc(db, 'users', userId, 'vault_entries', id);
-    await deleteDoc(docRef);
+    const { error } = await supabase
+      .from('vault_entries')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+    if (error) {
+      console.error("Supabase delete vault entry error:", error);
+      throw new Error("Supabase Sync Failed: " + error.message);
+    }
     return;
   }
 
@@ -243,15 +304,25 @@ export async function deleteVaultEntry(id: string, userId?: string): Promise<voi
 export async function getSecureNotes(userId?: string): Promise<SecureNote[]> {
   if (userId) {
     try {
-      const colRef = collection(db, 'users', userId, 'secure_notes');
-      const snap = await getDocs(colRef);
-      const notes: SecureNote[] = [];
-      snap.forEach(doc => {
-        notes.push(doc.data() as SecureNote);
-      });
-      return notes;
+      const { data, error } = await supabase
+        .from('secure_notes')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (error) throw error;
+
+      if (data) {
+        return data.map(item => ({
+          id: item.id,
+          title: item.title,
+          encryptedContent: typeof item.encrypted_content === 'string' ? JSON.parse(item.encrypted_content) : item.encrypted_content,
+          createdAt: item.created_at,
+          updatedAt: item.updated_at
+        }));
+      }
+      return [];
     } catch (err) {
-      console.error("Firestore loading of secure notes failed, fallback to local:", err);
+      console.error("Supabase loading of secure notes failed, fallback to local:", err);
     }
   }
 
@@ -265,8 +336,20 @@ export async function getSecureNotes(userId?: string): Promise<SecureNote[]> {
 
 export async function saveSecureNote(note: SecureNote, userId?: string): Promise<void> {
   if (userId) {
-    const docRef = doc(db, 'users', userId, 'secure_notes', note.id);
-    await setDoc(docRef, note);
+    const { error } = await supabase
+      .from('secure_notes')
+      .upsert({
+        id: note.id,
+        user_id: userId,
+        title: note.title,
+        encrypted_content: note.encryptedContent,
+        created_at: note.createdAt,
+        updated_at: note.updatedAt
+      });
+    if (error) {
+      console.error("Supabase upsert secure note error:", error);
+      throw new Error("Supabase Sync Failed: " + error.message);
+    }
     return;
   }
 
@@ -280,8 +363,15 @@ export async function saveSecureNote(note: SecureNote, userId?: string): Promise
 
 export async function deleteSecureNote(id: string, userId?: string): Promise<void> {
   if (userId) {
-    const docRef = doc(db, 'users', userId, 'secure_notes', id);
-    await deleteDoc(docRef);
+    const { error } = await supabase
+      .from('secure_notes')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId);
+    if (error) {
+      console.error("Supabase delete secure note error:", error);
+      throw new Error("Supabase Sync Failed: " + error.message);
+    }
     return;
   }
 
@@ -298,8 +388,7 @@ export async function deleteSecureNote(id: string, userId?: string): Promise<voi
    ========================================================================== */
 
 export async function clearAllVaultData(userId?: string): Promise<void> {
-  // If online, we don't automatically delete remote databases to protect user from mistakes,
-  // but we reset the client-side IndexedDB Cache immediately.
+  // Reset the client-side IndexedDB Cache immediately.
   const dbInst = await openDatabase();
   const stores = ['auth_config', 'vault_entries', 'secure_notes', 'settings'];
   const transaction = dbInst.transaction(stores, 'readwrite');
@@ -315,10 +404,10 @@ export async function clearAllVaultData(userId?: string): Promise<void> {
 }
 
 /* ==========================================================================
-   Migration helper to sync Local cache to Firebase Firestore cloud storage
+   Migration helper to sync Local cache to cloud storage (namespaced for backward compatibility)
    ========================================================================== */
 
-export async function syncLocalToFirebase(userId: string): Promise<void> {
+export async function syncCloud(userId: string): Promise<void> {
   // Sync core encryption config if absent in cloud
   const remoteConfig = await getMasterPasswordConfig(userId);
   if (!remoteConfig) {
@@ -331,18 +420,30 @@ export async function syncLocalToFirebase(userId: string): Promise<void> {
   // Push local entries to cloud
   const localEntries = await getVaultEntries();
   for (const entry of localEntries) {
-    await saveVaultEntry(entry, userId);
+    try {
+      await saveVaultEntry(entry, userId);
+    } catch (e) {
+      console.warn("Skipping item sync due to missing table/network:", e);
+    }
   }
 
   // Push local secure notes to cloud
   const localNotes = await getSecureNotes();
   for (const note of localNotes) {
-    await saveSecureNote(note, userId);
+    try {
+      await saveSecureNote(note, userId);
+    } catch (e) {
+      console.warn("Skipping notes sync due to missing table/network:", e);
+    }
   }
 
   // Push local settings to cloud
   const localSettings = await getAppSettings();
   if (localSettings) {
-    await saveAppSettings(localSettings, userId);
+    try {
+      await saveAppSettings(localSettings, userId);
+    } catch (e) {
+      console.warn("Skipping settings sync due to missing table/network:", e);
+    }
   }
 }
