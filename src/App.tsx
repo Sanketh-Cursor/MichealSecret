@@ -39,6 +39,7 @@ import { supabase } from './services/supabase';
 
 // Subcomponents
 import AuthScreen from './components/AuthScreen';
+import MasterPasswordModal from './components/MasterPasswordModal';
 import VaultList from './components/VaultList';
 import VaultForm from './components/VaultForm';
 import Generator from './components/Generator';
@@ -423,12 +424,22 @@ export default function App() {
           {/* Main content body */}
           <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto pb-24">
             {!isUnlocked ? (
-              <AuthScreen 
-                onAuthSuccess={handleUnlockSuccess} 
-                isInitialSetup={isInitialSetup} 
-                user={user}
-                onSignOut={handleSignOut}
-              />
+              <>
+                <AuthScreen 
+                  onAuthSuccess={handleUnlockSuccess} 
+                  isInitialSetup={isInitialSetup} 
+                  user={user}
+                  onSignOut={handleSignOut}
+                />
+                {/* When user is signed into cloud but vault is locked, ask for Master Password */}
+                <MasterPasswordModal
+                  isOpen={!!user && !isUnlocked}
+                  onClose={() => { /* no-op: require unlock or sign out */ }}
+                  isInitialSetup={isInitialSetup}
+                  user={user}
+                  onUnlock={handleUnlockSuccess}
+                />
+              </>
             ) : (
               <div className="space-y-6">
                 
