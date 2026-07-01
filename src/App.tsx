@@ -527,6 +527,7 @@ export default function App() {
                         settings={settings}
                         onSettingsUpdate={setSettings}
                         onFactoryReset={handleFactoryReset}
+                        onSignOut={handleSignOut}
                         masterKey={masterKey}
                         userId={user?.uid || undefined}
                       />

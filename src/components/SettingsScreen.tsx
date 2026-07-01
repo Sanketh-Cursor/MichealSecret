@@ -17,7 +17,8 @@ import {
   Timer, 
   FileJson,
   RefreshCw,
-  Fingerprint
+  Fingerprint,
+  LogOut
 } from 'lucide-react';
 import { AppSettings, VaultEntry, SecureNote } from '../types';
 import { 
@@ -36,6 +37,7 @@ interface SettingsScreenProps {
   settings: AppSettings;
   onSettingsUpdate: (newSettings: AppSettings) => void;
   onFactoryReset: () => void;
+  onSignOut: () => Promise<void>;
   masterKey: CryptoKey | null;
   userId?: string;
 }
@@ -44,6 +46,7 @@ export default function SettingsScreen({
   settings, 
   onSettingsUpdate, 
   onFactoryReset, 
+  onSignOut,
   masterKey,
   userId
 }: SettingsScreenProps) {
@@ -259,6 +262,30 @@ export default function SettingsScreen({
           </button>
         </div>
       )}
+
+      {/* Account Settings card */}
+      <div className="bg-white dark:bg-zinc-950 border border-slate-250/60 dark:border-zinc-900 p-5 rounded-2xl shadow-xs">
+        <div className="flex items-center gap-2 pb-3 mb-4 border-b border-slate-100 dark:border-zinc-900">
+          <LogOut className="w-4.5 h-4.5 text-indigo-550 dark:text-indigo-400" />
+          <h3 className="text-sm font-semibold text-slate-800 dark:text-zinc-200">
+            Account Session
+          </h3>
+        </div>
+
+        <p className="text-xs text-slate-500 dark:text-zinc-400 mb-4 leading-relaxed">
+          Sign out of your cloud account and lock the vault. This will remove the current encryption key from memory.
+        </p>
+
+        <button
+          onClick={onSignOut}
+          disabled={loading}
+          className="w-full flex items-center justify-center gap-2 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950/40 py-3 px-4 rounded-xl text-xs font-bold transition-all cursor-pointer border border-red-100 dark:border-red-900/40 shadow-sm active:scale-[0.98]"
+          id="btn-settings-signout"
+        >
+          <LogOut className="w-4 h-4" />
+          <span>Sign Out of Account</span>
+        </button>
+      </div>
 
       {/* Backup Utility card */}
       <div className="bg-white dark:bg-zinc-950 border border-slate-250/60 dark:border-zinc-900 p-5 rounded-2xl shadow-xs">
