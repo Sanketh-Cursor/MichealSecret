@@ -69,6 +69,18 @@ export default function SettingsScreen({
     }
   };
 
+  const showTempSuccess = (msg: string) => {
+    setSuccessMsg(msg);
+    setErrorMsg('');
+    setTimeout(() => setSuccessMsg(''), 4000);
+  };
+
+  const showTempError = (msg: string) => {
+    setErrorMsg(msg);
+    setSuccessMsg('');
+    setTimeout(() => setErrorMsg(''), 4000);
+  };
+
   const handleDisableBiometrics = async () => {
     setLoading(true);
     try {
@@ -221,73 +233,6 @@ export default function SettingsScreen({
           <span className="font-medium">{errorMsg}</span>
         </div>
       )}
-
-      {/* Theme Option card */}
-      <div className="bg-white dark:bg-zinc-950 border border-slate-250/60 dark:border-zinc-900 p-5 rounded-2xl shadow-xs">
-        <h3 className="text-sm font-semibold text-slate-800 dark:text-zinc-200 mb-4 flex items-center gap-2">
-          <Sun className="w-4.5 h-4.5 text-indigo-550 dark:text-indigo-400" />
-          Appearance Settings
-        </h3>
-        
-        <div className="flex gap-3">
-          <button
-            onClick={() => handleThemeChange('light')}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
-              settings.theme === 'light'
-                ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 border-indigo-150 dark:text-indigo-300 dark:border-indigo-900/60 shadow-xs'
-                : 'bg-white dark:bg-zinc-950 text-slate-500 border-slate-200 dark:border-zinc-850 hover:bg-slate-55 dark:hover:bg-zinc-900'
-            }`}
-            id="btn-settings-theme-light"
-          >
-            <Sun className="w-4 h-4" />
-            <span>Light Interface</span>
-          </button>
-          
-          <button
-            onClick={() => handleThemeChange('dark')}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
-              settings.theme === 'dark'
-                ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 border-indigo-150 dark:text-indigo-300 dark:border-indigo-900/60 shadow-xs'
-                : 'bg-white dark:bg-zinc-950 text-slate-500 border-slate-200 dark:border-zinc-850 hover:bg-slate-55 dark:hover:bg-zinc-900'
-            }`}
-            id="btn-settings-theme-dark"
-          >
-            <Moon className="w-4 h-4" />
-            <span>Dark Interface</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Auto-Lock Settings card */}
-      <div className="bg-white dark:bg-zinc-950 border border-slate-250/60 dark:border-zinc-900 p-5 rounded-2xl shadow-xs">
-        <div className="flex items-center gap-2 pb-3 mb-4 border-b border-slate-100 dark:border-zinc-900">
-          <Timer className="w-4.5 h-4.5 text-indigo-550 dark:text-indigo-400" />
-          <h3 className="text-sm font-semibold text-slate-800 dark:text-zinc-200">
-            Security Session Timeout
-          </h3>
-        </div>
-        
-        <p className="text-xs text-slate-500 dark:text-zinc-400 mb-4 leading-relaxed">
-          The Vault automatically locks memory caches and destroys the ephemeral Derived Master Key after specified minutes of inactive idle state or when minimizing the app focus.
-        </p>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-          {[1, 5, 15, 30, 0].map((dur) => (
-            <button
-              key={dur}
-              onClick={() => handleAutoLockChange(dur)}
-              className={`py-2 px-3 border text-center text-xs rounded-xl font-medium transition-all cursor-pointer ${
-                settings.autoLockDuration === dur
-                  ? 'bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-600 dark:text-white dark:border-indigo-650'
-                  : 'bg-white dark:bg-zinc-950 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-850 hover:bg-slate-55 dark:hover:bg-zinc-900'
-              }`}
-              id={`btn-lock-dur-${dur}`}
-            >
-              {dur === 0 ? 'Never Lock' : `${dur} Minute${dur > 1 ? 's' : ''}`}
-            </button>
-          ))}
-        </div>
-      </div>
 
       {/* Biometric Settings card */}
       {isBiometricAvailable && (
