@@ -9,6 +9,10 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || '';
 
+export const getAppUrl = () => {
+  return (import.meta as any).env.VITE_APP_URL || (import.meta as any).env.APP_URL || window.location.origin;
+};
+
 // Initialize Supabase Client with fallbacks to avoid compilation and loader crashes if not defined
 export const supabase = createClient(
   supabaseUrl || 'https://placeholder-project.supabase.co',

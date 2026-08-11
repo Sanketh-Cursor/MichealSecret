@@ -44,6 +44,7 @@ import VaultList from './components/VaultList';
 import VaultForm from './components/VaultForm';
 import Generator from './components/Generator';
 import SettingsScreen from './components/SettingsScreen';
+import ResetPasswordModal from './components/ResetPasswordModal';
 
 export default function App() {
   // Initialization state
@@ -51,6 +52,7 @@ export default function App() {
   const [isInitialSetup, setIsInitialSetup] = useState(true);
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [masterKey, setMasterKey] = useState<CryptoKey | null>(null);
+  const [isRecoveryMode, setIsRecoveryMode] = useState(false);
 
   // Supabase Auth state
   const [user, setUser] = useState<CompatUser | null>(null);
@@ -88,6 +90,10 @@ export default function App() {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecoveryMode(true);
+      }
+
       const currentUser = session?.user || null;
       const compatUser = currentUser ? { ...currentUser, uid: currentUser.id } as CompatUser : null;
       setUser(compatUser);
@@ -431,6 +437,11 @@ export default function App() {
                   isInitialSetup={isInitialSetup}
                   user={user}
                   onUnlock={handleUnlockSuccess}
+                />
+
+                <ResetPasswordModal
+                  isOpen={isRecoveryMode}
+                  onClose={() => setIsRecoveryMode(false)}
                 />
               </>
             ) : (

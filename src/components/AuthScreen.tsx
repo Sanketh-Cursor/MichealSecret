@@ -21,7 +21,14 @@ import {
   UserPlus
 } from 'lucide-react';
 import { User } from '@supabase/supabase-js';
-import { supabase, sendPasswordResetEmail, isPasskeySupported, startPasskeySignIn, startPasskeyRegistration } from '../services/supabase';
+import {
+  supabase,
+  sendPasswordResetEmail,
+  isPasskeySupported,
+  startPasskeySignIn,
+  startPasskeyRegistration,
+  getAppUrl
+} from '../services/supabase';
 import { syncCloud } from '../services/db';
 
 interface AuthScreenProps {
@@ -119,7 +126,7 @@ export default function AuthScreen({
     }
     setForgotLoading(true);
     try {
-      await sendPasswordResetEmail(targetEmail, window.location.origin);
+      await sendPasswordResetEmail(targetEmail, getAppUrl());
       setForgotSuccess('Password reset email sent — check your inbox.');
       setIsForgotModalOpen(false);
       setForgotEmailInput('');
